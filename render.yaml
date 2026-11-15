@@ -10,11 +10,15 @@ services:
       - key: DB_PATH
         value: ./assistant.db
       - key: TICKERS
-        value: SBER, GAZP, LKOH, ROSN, YDEX
+        value: SBER,GAZP,LKOH,ROSN,YDEX
       - key: MOEX_BOARD
         value: TQBR
+      - key: MARKET_BOARDS
+        value: TQBR,TQTF,TQPI,TQDE,TQIR
       - key: SCAN_INTERVAL_MINUTES
         value: "0"
+      - key: REQUEST_PAUSE_SECONDS
+        value: "0.35"
       - key: RSS_FEEDS
         value: ""
       - key: TELEGRAM_BOT_TOKEN
