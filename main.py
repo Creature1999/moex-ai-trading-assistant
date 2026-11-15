@@ -96,19 +96,34 @@ def get_catalog(force=False):
 
 
 def get_candles(ticker: str, days: int = 900, board: str = None) -> pd.DataFrame:
-    start = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
-    url = f"https://iss.moex.com/iss/engines/stock/markets/shares/boards/{board or BOARD}/securities/{ticker}/candles.json"
-    params = {"from": start, "interval": 24, "iss.meta": "off", "iss.only": "candles"}
-    block = iss_get(url, params).get("candles", {})
-    rows = block.get("data", [])
-    cols = block.get("columns", [])
+    """Fetch paginated MOEX ISS daily candles, not just the first page."""
+    if not re.fullmatch(r"[A-Z0-9_.-]{1,24}", ticker.upper()):
+        raise ValueError("Некорректный тикер")
+    board = board or BOARD
+    if board not in MARKET_BOARDS:
+        raise ValueError("Некорректный режим торгов")
+    start_date = (datetime.now(timezone.utc) - timedelta(days=days)).date().isoformat()
+    url = f"https://iss.moex.com/iss/engines/stock/markets/shares/boards/{board}/securities/{ticker.upper()}/candles.json"
+    rows, cols, offset = [], [], 0
+    while True:
+        data = iss_get(url, {"from": start_date, "interval": 24, "iss.meta": "off", "iss.only": "candles", "start": offset})
+        block = data.get("candles", {})
+        page = block.get("data", [])
+        cols = block.get("columns", cols)
+        if not page:
+            break
+        rows.extend(page)
+        offset += len(page)
+        if len(page) < 500 or offset > 12000:
+            break
+        time.sleep(REQUEST_PAUSE)
     if not rows:
-        raise ValueError("MOEX ISS не вернул дневные свечи. Проверьте тикер, режим торгов и доступность данных.")
+        raise ValueError("MOEX ISS не вернул свечи для тикера/режима")
     df = pd.DataFrame(rows, columns=cols)
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df["begin"] = pd.to_datetime(df["begin"])
-    return df.dropna(subset=["close"]).sort_values("begin").drop_duplicates("begin").reset_index(drop=True)
+    return df.dropna(subset=["open", "high", "low", "close"]).sort_values("begin").drop_duplicates("begin").reset_index(drop=True)
 
 def calculate(df: pd.DataFrame) -> dict:
     if len(df) < 210:
@@ -238,37 +253,140 @@ def full_scan_status():
     return result
 
 
-@app.get("/api/backtest/{ticker}")
-def backtest(ticker: str, board: str = "TQBR", fee_bps: float = 10, slippage_bps: float = 10):
-    """Educational long-only next-open, fixed 10-bar holding test; not a full execution simulator."""
-    if board not in MARKET_BOARDS or not re.fullmatch(r"[A-Z0-9_.-]{1,24}", ticker.upper()):
-        raise HTTPException(status_code=400, detail="Некорректный тикер или режим торгов")
+def simulate(df: pd.DataFrame, years: int, fee_bps: float, slippage_bps: float) -> dict:
+    """Educational long-only, no overlap, next-day open and 10-bar close.
+    Signal uses prior close only. Equity includes flat periods and mark-to-market
+    during positions. No corporate-action adjustments or portfolio constraints.
+    """
+    if len(df) < 220:
+        raise ValueError("Недостаточно истории для EMA200 и тестирования")
+    x = df.copy()
+    c = x["close"]
+    x["ema20"] = c.ewm(span=20, adjust=False).mean()
+    x["ema50"] = c.ewm(span=50, adjust=False).mean()
+    x["ema200"] = c.ewm(span=200, adjust=False).mean()
+    delta = c.diff()
+    up = delta.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
+    down = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
+    rs = up / down.replace(0, float("nan"))
+    x["rsi"] = 100 - 100 / (1 + rs)
+    x["vol_avg20"] = x["volume"].rolling(20).mean()
+    scores = ((c > x["ema200"]).astype(int) +
+              (x["ema50"] > x["ema200"]).astype(int) +
+              (x["ema20"] > x["ema50"]).astype(int) +
+              (x["rsi"].between(45,65)).astype(int) +
+              ((c >= x["open"]) & (x["volume"] > x["vol_avg20"])).astype(int))
+    signals = (scores >= 4) & (c > x["ema200"])
+    end = x["begin"].max()
+    cutoff = end - pd.DateOffset(years=years)
+    start_idx = max(210, int(x["begin"].searchsorted(cutoff)))
+    cost = (fee_bps + slippage_bps) / 10000
+    trades = []
+    equity, curve = 1.0, []
+    i = start_idx
+    while i < len(x):
+        if i + 11 < len(x) and bool(signals.iloc[i-1]):
+            entry_i, exit_i = i, i+10
+            entry, exitp = float(x.iloc[entry_i]["open"]), float(x.iloc[exit_i]["close"])
+            if entry > 0 and exitp > 0 and math.isfinite(entry) and math.isfinite(exitp):
+                gross = exitp / entry
+                factor = gross * (1-cost)/(1+cost)
+                trades.append({"entry_date":str(x.iloc[entry_i]["begin"].date()),
+                               "exit_date":str(x.iloc[exit_i]["begin"].date()),
+                               "return_pct":round((factor-1)*100,3)})
+                initial_equity = equity
+                for j in range(entry_i,exit_i+1):
+                    mark = float(x.iloc[j]["close"])
+                    marked = initial_equity * (mark / (entry*(1+cost)))
+                    if j == exit_i: marked = initial_equity*factor
+                    curve.append({"date":str(x.iloc[j]["begin"].date()),"equity":round(marked,6)})
+                equity *= factor
+                i = exit_i+1
+                continue
+        curve.append({"date":str(x.iloc[i]["begin"].date()),"equity":round(equity,6)})
+        i += 1
+    returns = [t["return_pct"]/100 for t in trades]
+    wins = [r for r in returns if r > 0]
+    losses = [r for r in returns if r < 0]
+    gp = sum(wins); gl = -sum(losses)
+    pf = round(gp/gl,3) if gl > 0 else None
+    peak, dd = 1.0, 0.0
+    for point in curve:
+        peak = max(peak,point["equity"])
+        dd = max(dd, (peak-point["equity"])/peak)
+    return {"count":len(trades),"win_rate_pct":round(100*len(wins)/len(trades),2) if trades else None,
+            "profit_factor":pf,"max_drawdown_pct":round(dd*100,2),
+            "total_return_pct":round((equity-1)*100,2),
+            "avg_return_pct":round(sum(returns)/len(returns)*100,2) if trades else None,
+            "trades":trades,"equity_curve":curve,
+            "first_date":str(x.iloc[start_idx]["begin"].date()),
+            "last_date":str(end.date()),
+            "method":"Сигнал по закрытию предыдущего дня; вход на следующем открытии, выход на закрытии через 10 свечей; одна позиция одновременно; фиксированная доля капитала 100%; комиссии и проскальзывание на обе стороны. Без дивидендов, корпоративных корректировок и налогов. Учебная модель, не исполнение на бирже."}
+
+
+def validate_test(years, fee_bps, slippage_bps):
+    if years not in (1,3,5):
+        raise HTTPException(400, "Период: 1, 3 или 5 лет")
     if not (0 <= fee_bps <= 100 and 0 <= slippage_bps <= 100):
-        raise HTTPException(status_code=400, detail="Комиссии должны быть от 0 до 100 б.п.")
+        raise HTTPException(400, "Комиссия и проскальзывание: 0–100 б.п.")
+
+
+@app.get("/api/backtest/{ticker}")
+def backtest(ticker: str, board: str = "TQBR", years: int = 3, fee_bps: float = 10, slippage_bps: float = 10):
+    validate_test(years,fee_bps,slippage_bps)
+    if board not in MARKET_BOARDS or not re.fullmatch(r"[A-Z0-9_.-]{1,24}", ticker.upper()):
+        raise HTTPException(400,"Некорректный тикер или режим торгов")
     try:
-        df = get_candles(ticker.upper(), days=900, board=board)
-        trades = []
-        i = 210
-        cost = (fee_bps + slippage_bps) / 10000
-        while i < len(df) - 11:
-            historical = df.iloc[:i].copy()
-            a = calculate(historical)
-            if a["signal"] == "ВОЗМОЖНЫЙ БЫЧИЙ СЕТАП":
-                entry = float(df.iloc[i]["open"])
-                exit_price = float(df.iloc[i+10]["close"])
-                if entry > 0 and exit_price > 0 and math.isfinite(entry) and math.isfinite(exit_price):
-                    ret = (exit_price * (1-cost)) / (entry * (1+cost)) - 1
-                    trades.append({"entry_date": str(df.iloc[i]["begin"].date()), "exit_date": str(df.iloc[i+10]["begin"].date()), "return_pct": round(ret*100, 2)})
-                i += 11
-            else:
-                i += 1
-        wins = sum(t["return_pct"] > 0 for t in trades)
-        return {"ticker": ticker.upper(), "board": board, "trades": trades[-100:], "count": len(trades),
-                "win_rate_pct": round(100*wins/len(trades), 1) if trades else None,
-                "avg_return_pct": round(sum(t["return_pct"] for t in trades)/len(trades), 2) if trades else None,
-                "method": "Вход по открытию следующей свечи, выход через 10 торговых свечей; комиссии и проскальзывание на обе стороны. Без дивидендов и корпоративных корректировок."}
+        df = get_candles(ticker.upper(), days=years*366+550, board=board)
+        result = simulate(df,years,fee_bps,slippage_bps)
+        return {"ticker":ticker.upper(),"board":board,"years":years,**result}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(400,detail=str(e))
+
+market_test_lock = threading.Lock()
+market_test = {"status":"idle","total":0,"done":0,"errors":0,"results":[],"message":""}
+
+
+def run_market_backtest(years, fee_bps, slippage_bps):
+    try:
+        items = get_catalog()
+        with market_test_lock:
+            market_test.update(status="running",total=len(items),done=0,errors=0,results=[],message="Тестирование акций")
+        for item in items:
+            try:
+                df = get_candles(item["ticker"],days=years*366+550,board=item["board"])
+                result = simulate(df,years,fee_bps,slippage_bps)
+                summary = {k:result[k] for k in ("count","win_rate_pct","profit_factor","max_drawdown_pct","total_return_pct","first_date","last_date")}
+                summary.update(item)
+                with market_test_lock: market_test["results"].append(summary)
+            except Exception:
+                with market_test_lock: market_test["errors"] += 1
+            finally:
+                with market_test_lock: market_test["done"] += 1
+                time.sleep(REQUEST_PAUSE)
+        with market_test_lock:
+            market_test.update(status="finished",message="Тестирование завершено")
+    except Exception as e:
+        with market_test_lock: market_test.update(status="error",message=str(e))
+
+
+@app.post("/api/market-backtest/start")
+def start_market_backtest(years: int = 3, fee_bps: float = 10, slippage_bps: float = 10):
+    validate_test(years,fee_bps,slippage_bps)
+    with market_test_lock:
+        if market_test["status"] in ("loading","running"):
+            return {"status":"busy"}
+        market_test.update(status="loading",total=0,done=0,errors=0,results=[],message="Получение каталога")
+    threading.Thread(target=run_market_backtest,args=(years,fee_bps,slippage_bps),daemon=True).start()
+    return {"status":"started"}
+
+
+@app.get("/api/market-backtest/status")
+def market_backtest_status():
+    with market_test_lock:
+        output = dict(market_test)
+        output["results"] = sorted(market_test["results"],key=lambda r:(-r["count"],r["ticker"]))
+    return output
 
 
 @app.get("/api/catalog")
