@@ -60,3 +60,4 @@ document.getElementById('fullscan').onclick=async()=>{document.getElementById('f
 document.getElementById('fullresults').onclick=async e=>{let b=e.target.closest('button[data-ticker]');if(!b)return;let t=b.dataset.ticker,board=b.dataset.board;document.getElementById('backtest').textContent=`Считаю учебный тест ${t}…`;try{let d=await api(`/api/backtest/${encodeURIComponent(t)}?board=${encodeURIComponent(board)}`);document.getElementById('backtest').textContent=`${t}: сделок ${d.count}; доля прибыльных ${d.win_rate_pct??'—'}%; средняя доходность сделки ${d.avg_return_pct??'—'}%. ${d.method}`;}catch(err){document.getElementById('backtest').textContent=err.message;}};
 document.getElementById('scan').onclick=scan;document.getElementById('refresh').onclick=()=>{loadHistory();loadNews()};document.getElementById('tickerSelect').onchange=e=>loadChart(e.target.value);init();
 </script></body></html>
+
