@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 APP_TITLE = "MOEX AI Trading Assistant"
-APP_VERSION = "v9"
+APP_VERSION = "v10"
 DB_PATH = os.getenv("DB_PATH", "assistant.db")
 TICKERS = [x.strip().upper() for x in os.getenv("TICKERS", "SBER,GAZP,LKOH,ROSN,YDEX").split(",") if x.strip()]
 BOARD = os.getenv("MOEX_BOARD", "TQBR")
@@ -548,7 +548,7 @@ def research(ticker: str, board: str = "TQBR", risk_capital: float = 100000,
 
 @app.get("/api/strategy-lab/{ticker}")
 def strategy_lab(ticker: str, board: str = "TQBR", years: int = 3, fee_bps: float = 10, slippage_bps: float = 10):
-    from strategy_lab import backtest, buy_and_hold
+    from strategy_lab import backtest, buy_and_hold, STRATEGIES, STRATEGY_NAMES
     from research_desk import completed_daily
     validate_test(years, fee_bps, slippage_bps)
     if board not in MARKET_BOARDS or not re.fullmatch(r"[A-Z0-9_.-]{1,24}", ticker.upper()):
@@ -562,7 +562,7 @@ def strategy_lab(ticker: str, board: str = "TQBR", years: int = 3, fee_bps: floa
         if len(df)-begin_ix<100:
             raise ValueError('Недостаточно завершённых свечей для честного сравнения')
         split_ix=begin_ix+int((len(df)-begin_ix)*0.7)
-        modes=("adaptive", "adaptive_mtf", "adaptive_pullback", "momentum", "breakout")
+        modes=STRATEGIES
         rows=[]
         train_benchmark=buy_and_hold(df.iloc[:split_ix].copy(),begin_ix,fee_bps,slippage_bps)
         test_benchmark=buy_and_hold(df,split_ix,fee_bps,slippage_bps)
@@ -578,13 +578,18 @@ def strategy_lab(ticker: str, board: str = "TQBR", years: int = 3, fee_bps: floa
             status=("НЕДОСТАТОЧНО СДЕЛОК" if not enough else
                     "ТРЕБУЕТ ДОПОЛНИТЕЛЬНОЙ ПРОВЕРКИ" if positive and outperform else
                     "ПРЕИМУЩЕСТВО НЕ ПОДТВЕРЖДЕНО")
-            rows.append({"strategy":mode, "train":{k:train[k] for k in fields},
-                         "test":{k:holdout[k] for k in fields},"status":status})
+            rows.append({"strategy":mode, "name":STRATEGY_NAMES[mode],
+                         "train":{k:train[k] for k in fields},
+                         "test":{k:holdout[k] for k in fields},
+                         "diagnostics":holdout["diagnostics"],
+                         "exit_reasons":holdout["exit_reasons"],
+                         "trades":holdout["trades"],
+                         "status":status})
         return {"ticker":ticker.upper(),"board":board,"years":years,"version":APP_VERSION,
                 "train_from":str(df.begin.iloc[begin_ix].date()),"test_from":str(df.begin.iloc[split_ix].date()),
                 "test_to":str(df.begin.iloc[-1].date()),"results":rows,
                 "buy_hold":{"train":train_benchmark,"test":test_benchmark},
-                "note":"Сравниваются ПЯТЬ новых стратегий, НЕ прежняя EMA+RSI с выходом через 10 свечей. Фиксированные правила и хронологический контроль 70/30, без подбора на контрольном участке. Риск на исходном стопе до 1% капитала (гэпы могут дать больший убыток), без плеча, комиссии и проскальзывание на обе стороны. Показаны и простаивающие периоды. Контроль на одном отрезке/тикере и малое число сделок не доказывают преимуществ. Не учитываются дивиденды, корпоративные действия, ликвидность и налоги."}
+                "note":"Версия v10: семь прозрачных гипотез, журнал каждой сделки, воронка причин отклонения сигналов и режимы рынка. Контроль 70/30, без оптимизации на контрольном периоде, но после просмотра прошлых результатов SBER/GAZP это НЕ полностью независимая проверка. Риск по исходному стопу примерно до 1% капитала, гэпы могут увеличить потери, без плеча; комиссии и проскальзывание на обе стороны. Бенчмарк — ценовое удержание, без дивидендов, корпоративных поправок, ликвидности и налогов. Рынок может меняться; статистика с малым числом сделок неубедительна."}
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
     except Exception as e:
