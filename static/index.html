@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MOEX AI Trading Assistant</title>
+<title>MOEX AI Trading Assistant · v8</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
 :root{--bg:#0b1220;--panel:#121d30;--panel2:#17243a;--line:#263750;--text:#e8eef8;--muted:#9aabc2;--green:#26c281;--red:#f16f78;--blue:#6aa8ff;--gold:#e8bd61}
@@ -15,25 +15,52 @@ h1{font-size:22px;margin:0}small,.muted{color:var(--muted)}main{max-width:1440px
 .tablewrap{overflow:auto}table{width:100%;border-collapse:collapse;min-width:800px}th,td{text-align:left;padding:12px 10px;border-bottom:1px solid var(--line);white-space:nowrap}th{color:var(--muted);font-size:12px;text-transform:uppercase}
 .pill{display:inline-block;padding:5px 8px;border-radius:20px;background:#20344a;color:var(--muted);font-size:12px}.pill.good{background:#123d32;color:#73e0b1}.pill.bad{background:#47252e;color:#ff9ba2}
 .two{display:grid;grid-template-columns:1.5fr 1fr;gap:14px}.newsitem{padding:12px 0;border-bottom:1px solid var(--line)}a{color:#8bbaff}.foot{color:var(--muted);font-size:12px;line-height:1.6;margin-top:25px}
+input,select{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:10px;max-width:100%}
+#researchQuery{min-width:min(340px,85vw);font-size:16px}
+.research-form{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin:12px 0}
+.research-form label{display:flex;flex-direction:column;gap:6px;color:var(--muted);font-size:12px}
+.research-form label input{min-width:100px}
+.report-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.report-card{border:1px solid var(--line);border-radius:12px;background:var(--panel2);padding:14px;min-width:0}
+.report-card h3{font-size:15px;margin:0 0 8px}
+.report-list{list-style:none;margin:0;padding:0}.report-list li{display:flex;gap:10px;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
+.report-list li span:first-child{color:var(--muted)}
+#researchCandidates button{margin:4px 6px 4px 0}
+#researchStatus{margin:12px 0}.signal-yes{color:var(--green)}.signal-no{color:var(--red)}
+@media(max-width:700px){.report-grid{grid-template-columns:1fr}}
 @media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}.two{grid-template-columns:1fr}}@media(max-width:520px){.grid{grid-template-columns:1fr}header{align-items:flex-start}}
 </style></head>
 <body>
-<header><div><h1>📈 MOEX AI Trading Assistant</h1><small>Российский рынок · Аналитические сигналы · Без автоторговли</small></div>
+<header><div><h1>📈 MOEX AI Trading Assistant</h1><small>v8 · MOEX ISS · Техиндикаторы + временные интервалы + проверяемая модель · Без автоторговли</small></div>
 <div class="actions"><button id="scan">Сканировать рынок</button><button class="secondary" id="refresh">Обновить данные</button></div></header>
 <main>
+<section class="section panel" id="researchPanel">
+<h2>🔎 Поиск и полный анализ акции</h2>
+<p class="muted">Введите тикер или название, например «Сбербанк», «Газпром», SBER. Прогноз модели — исследовательская оценка, не вероятность прибыльной сделки.</p>
+<div class="research-form">
+<label>Акция <input id="researchQuery" value="Сбербанк" placeholder="Название или тикер" maxlength="80" autocomplete="off"></label>
+<label>Режим <select id="researchBoard"><option value="TQBR">TQBR</option><option value="TQTF">TQTF</option><option value="TQPI">TQPI</option><option value="TQDE">TQDE</option><option value="TQIR">TQIR</option></select></label>
+<label>Учебный капитал, ₽ <input id="riskCapital" type="number" min="1000" max="100000000" value="100000"></label>
+<label>Риск на сценарий, % <input id="riskPercent" type="number" min="0.1" max="3" step="0.1" value="1"></label>
+<button id="researchRun">Анализировать</button>
+</div>
+<div id="researchCandidates"></div>
+<div id="researchStatus" class="muted">Нажмите «Анализировать». Используются завершённые дневные свечи MOEX, без внутридневных прогнозов.</div>
+<div id="researchReport"></div>
+</section>
 <div class="grid">
 <div class="card"><small>Инструменты в сканере</small><div class="metric" id="count">—</div></div>
 <div class="card"><small>Кандидаты на покупку</small><div class="metric" id="candidates">—</div></div>
 <div class="card"><small>Последнее сканирование</small><div class="metric" style="font-size:16px" id="scanned">—</div></div>
 <div class="card"><small>Telegram</small><div class="metric" style="font-size:17px" id="telegram">—</div></div>
 </div>
-<div class="section panel"><h2>Полный сканер MOEX</h2>
+<div class="section panel"><h2>Полный сканер MOEX · базовые сигналы (0–5)</h2>
 <button id="fullscan">Сканировать все доступные акции</button>
 <div class="muted" id="fullstatus" style="margin:12px 0">Сканирование запускается отдельно; может занять несколько минут. На бесплатном Render прервётся при перезапуске сервера.</div>
 <div class="tablewrap"><table><thead><tr><th>Тикер</th><th>Режим</th><th>Сигнал</th><th>Оценка</th><th>Цена</th><th>RSI</th><th>Оборот за день, средн. ₽*</th><th>Тест</th></tr></thead><tbody id="fullresults"><tr><td colspan="8" class="muted">Запустите сканирование</td></tr></tbody></table></div>
 <small>* Приближённая оценка: цена × объём. Не гарантирует доступную ликвидность.</small>
 <div id="backtest" class="muted" style="margin-top:12px"></div></div>
-<div class="section panel"><h2>Историческое тестирование v3</h2>
+<div class="section panel"><h2>Базовый исторический тест · прежняя стратегия</h2>
 <p class="muted">Выберите тикер или весь рынок. Сравнивайте только тесты с одинаковыми настройками. Исторические результаты не прогнозируют доходность.</p>
 <div class="actions" style="align-items:center;margin:12px 0">
 <label>Тикер <input id="btTicker" value="SBER" maxlength="24" style="width:100px;background:#17243a;color:white;padding:9px;border:1px solid #263750;border-radius:8px"></label>
@@ -58,7 +85,21 @@ h1{font-size:22px;margin:0}small,.muted{color:var(--muted)}main{max-width:1440px
 </div>
 <div class="section panel"><h2>Новости</h2><div id="news" class="muted">RSS-ленты не настроены. Добавьте источники в переменную RSS_FEEDS.</div></div>
 
-<div class="section panel" id="strategyLab"><h2>Лаборатория стратегий · SBER и другие акции</h2><p class="muted">Сравнение трёх учебных стратегий на истории. Высокий Win Rate не гарантирует доходность; результаты не являются прогнозом.</p><div class="actions"><input id="labTicker" value="SBER" placeholder="Тикер, например SBER" style="padding:10px;border-radius:8px;background:#17243a;color:white;border:1px solid #263750"><select id="labYears" style="padding:10px;background:#17243a;color:white"><option value="1">1 год</option><option value="3" selected>3 года</option><option value="5">5 лет</option></select><button id="labRun">Сравнить стратегии</button></div><p id="labStatus" class="muted">Нажми «Сравнить стратегии».</p><div style="overflow-x:auto"><table style="width:100%"><thead><tr><th>Стратегия</th><th>Сделок</th><th>Win Rate</th><th>Profit Factor</th><th>Просадка</th><th>Доходность</th></tr></thead><tbody id="labRows"></tbody></table></div><p class="muted">Результаты внутри выборки; нужны проверка на отдельном периоде и учёт дивидендов, спредов и корпоративных событий.</p></div>
+<section class="section panel" id="strategyLab">
+<h2>🧪 Лаборатория стратегий · проверка на новых данных</h2>
+<p class="muted">Сравнение фиксированных правил, без подбора параметров на контрольной части истории. 70% старых наблюдений — первоначальный период; последние 30% — контрольный. Результаты НЕ гарантия заработка.</p>
+<div class="actions" style="align-items:center;margin:10px 0">
+<input id="labTicker" value="SBER" aria-label="Тикер для стратегии" placeholder="SBER" maxlength="24">
+<select id="labBoard" aria-label="Режим торгов"><option>TQBR</option><option>TQTF</option><option>TQPI</option><option>TQDE</option><option>TQIR</option></select>
+<select id="labYears" aria-label="Период теста"><option value="1">1 год</option><option value="3" selected>3 года</option><option value="5">5 лет</option></select>
+<label>Комиссия, б.п. <input id="labFee" type="number" min="0" max="100" value="10" style="width:75px"></label>
+<label>Проскальзывание, б.п. <input id="labSlip" type="number" min="0" max="100" value="10" style="width:75px"></label>
+<button id="labRun">Сравнить 4 стратегии</button>
+</div>
+<p id="labStatus" class="muted">Нажмите «Сравнить 4 стратегии».</p>
+<div class="tablewrap"><table><thead><tr><th>Стратегия</th><th>Сделок в тесте</th><th>Win Rate<br>в тесте</th><th>Profit Factor<br>в тесте</th><th>Макс. просадка<br>в тесте</th><th>Доходность<br>в тесте</th><th>Доходность<br>на старых данных</th></tr></thead><tbody id="labRows"></tbody></table></div>
+<small>⚠️ При 0–9 сделках статистика особенно ненадёжна. Не учитываются дивиденды, налоги, ликвидность, корпоративные события и выбывшие из выборки акции.</small>
+</section>
 <div class="foot">Важное предупреждение: оценка 0–5 показывает количество выполненных фильтров, а не вероятность успеха и не винрейт. Прототип не гарантирует доходность, не учитывает автоматически все комиссии, спреды, корпоративные события и ограничения конкретного инструмента. Не используйте сигналы для реальных сделок без независимой проверки и тестирования.</div>
 </main>
 <script>
@@ -69,7 +110,7 @@ function renderRows(rows){document.getElementById('results').innerHTML=rows.map(
 async function scan(){let b=document.getElementById('scan');b.disabled=true;document.getElementById('status').textContent='Загружаю и анализирую дневные свечи MOEX…';try{let d=await api('/api/scan',{method:'POST'});renderRows(d.results);document.getElementById('scanned').textContent=new Date(d.scanned_at).toLocaleString('ru-RU');document.getElementById('status').textContent='Сканирование завершено.';loadHistory()}catch(e){document.getElementById('status').textContent=e.message}finally{b.disabled=false}}
 async function loadChart(t){if(!t)return;try{let d=await api('/api/chart/'+encodeURIComponent(t));let c=d.candles;let ctx=document.getElementById('chart');if(chart)chart.destroy();chart=new Chart(ctx,{type:'line',data:{labels:c.map(x=>x.date),datasets:[{label:'Цена закрытия',data:c.map(x=>x.close),borderColor:'#6aa8ff',pointRadius:0,borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:'#e8eef8'}}},scales:{x:{ticks:{color:'#9aabc2',maxTicksLimit:8},grid:{color:'#263750'}},y:{ticks:{color:'#9aabc2'},grid:{color:'#263750'}}}}});let a=d.analysis;document.getElementById('detail').textContent=`${t}: ${a.signal}. EMA20 ${fmt(a.ema20)}, EMA50 ${fmt(a.ema50)}, EMA200 ${fmt(a.ema200)}, RSI ${fmt(a.rsi)}. ${a.reason}`}catch(e){document.getElementById('detail').textContent=e.message}}
 async function loadHistory(){try{let h=await api('/api/history?limit=12');document.getElementById('history').innerHTML=h.map(x=>`<div class="newsitem"><b>${x.ticker}</b> · ${x.signal}<br><small>${new Date(x.scanned_at).toLocaleString('ru-RU')} · ${x.score}/5 · закрытие ${fmt(x.close)}</small></div>`).join('')||'История пуста'}catch(e){}}
-async function loadNews(){try{let n=await api('/api/news');document.getElementById('news').innerHTML=n.length?n.map(x=>`<div class="newsitem"><a href="${x.link}" target="_blank" rel="noopener">${x.title}</a><br><small>${x.source} · ${x.published}</small></div>`).join(''):'RSS-ленты не настроены. Добавьте проверенные адреса RSS в RSS_FEEDS.'}catch(e){}}
+async function loadNews(){try{let n=await api('/api/news');document.getElementById('news').innerHTML=n.length?n.map(x=>{const u=String(x.link||'');const a=/^https?:\/\//i.test(u)?`<a href="${safeText(u)}" target="_blank" rel="noopener noreferrer">${safeText(x.title)}</a>`:safeText(x.title);return `<div class="newsitem">${a}<br><small>${safeText(x.source)} · ${safeText(x.published)}</small></div>`}).join(''):'RSS-ленты не настроены. Добавьте проверенные адреса RSS в RSS_FEEDS.'}catch(e){}}
 async function init(){try{let c=await api('/api/config');document.getElementById('count').textContent=c.tickers.length;document.getElementById('telegram').textContent=c.telegram_configured?'Подключён':'Не настроен';document.getElementById('status').textContent=`Тикеры: ${c.tickers.join(', ')} · режим MOEX: ${c.board} · автоинтервал: ${c.scan_interval_minutes||'выключен'} мин.`}catch(e){document.getElementById('status').textContent=e.message}loadHistory();loadNews()}
 let scanTimer=null;
 function safeText(v){return String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -87,7 +128,82 @@ document.getElementById('btAll').onclick=async()=>{document.getElementById('btAl
 document.getElementById('btRows').onclick=e=>{let b=e.target.closest('button[data-btticker]');if(b)btOne(b.dataset.btticker,b.dataset.btboard)};
 document.getElementById('scan').onclick=scan;document.getElementById('refresh').onclick=()=>{loadHistory();loadNews()};document.getElementById('tickerSelect').onchange=e=>loadChart(e.target.value);init();
 
-document.getElementById('labRun').onclick=async()=>{let b=document.getElementById('labRun'),st=document.getElementById('labStatus');b.disabled=true;st.textContent='Загружаю котировки и сравниваю стратегии…';try{let t=document.getElementById('labTicker').value.trim().toUpperCase();let y=document.getElementById('labYears').value;let d=await api(`/api/strategy-lab/${encodeURIComponent(t)}?years=${y}`);let names={adaptive:'Adaptive Trend',momentum:'Momentum',breakout:'Breakout'};document.getElementById('labRows').innerHTML=d.results.map(r=>`<tr><td>${names[r.strategy]}</td><td>${r.count}</td><td>${r.win_rate_pct??'—'}%</td><td>${r.profit_factor??'—'}</td><td>${r.max_drawdown_pct}%</td><td>${r.total_return_pct}%</td></tr>`).join('');st.textContent=`${t}: ${d.results[0].first_date} — ${d.results[0].last_date}. Результаты не гарантируют прибыль.`;}catch(e){st.textContent='Ошибка: '+e.message}finally{b.disabled=false}};
+function metricLine(label,value){return `<li><span>${safeText(label)}</span><strong>${safeText(value??'—')}</strong></li>`;}
+function makeTable(title,entries){return `<div class="report-card"><h3>${safeText(title)}</h3><ul class="report-list">${entries.map(([a,b])=>metricLine(a,b)).join('')}</ul></div>`;}
+function fmtPct(v){return v==null?'—':String(v)+'%';}
+function riskStatus(ok){return ok?'<span class="signal-yes">✔ Да</span>':'<span class="signal-no">— Нет</span>';}
+function renderResearch(d){
+ const r=d.research, m=d.model, a=r.indicators, plan=r.scenario;
+ const mtf=makeTable('Таймфреймы · завершённые свечи',r.timeframes.map(t=>[t.timeframe+' · '+(t.date||'—'),t.status]));
+ const indicator=makeTable('Технические показатели',[
+ ['Цена закрытия',fmt(a.close)+' ₽'],['EMA20 / EMA50 / EMA200', [a.ema20,a.ema50,a.ema200].map(fmt).join(' / ')],
+ ['Supertrend',fmt(a.supertrend)+' ₽ · '+(a.supertrend_up?'рост':'снижение')],['MACD (гистограмма)',fmt(a.macd_hist)],
+ ['RSI 14',fmt(a.rsi)],['ADX 14',fmt(a.adx)],['Объём / средний 20',a.volume_ratio==null?'—':fmt(a.volume_ratio)+'×'],['ATR 14',fmt(a.atr)]
+ ]);
+ const checks=`<div class="report-card"><h3>Проверка условий · ${r.confirmed} из ${r.total_checks}</h3><ul class="report-list">${r.checks.map(c=>`<li><span>${safeText(c.name)}</span><strong>${riskStatus(c.ok)}</strong></li>`).join('')}</ul><small>Число совпадений НЕ вероятность успеха.</small></div>`;
+ const risk=makeTable('Учебный торговый сценарий',[
+ ['Текущий статус',r.status],['Цена-триггер (не заявка)',plan.entry_trigger==null?'—':fmt(plan.entry_trigger)+' ₽'],
+ ['Стоп при исполнении по уровню',plan.stop==null?'—':fmt(plan.stop)+' ₽'],['Цель (2R)',plan.target==null?'—':fmt(plan.target)+' ₽'],
+ ['Расчётное соотношение риск/цель',plan.risk_reward==null?'—':'1 : '+fmt(plan.risk_reward)],
+ ['Учебный объём, акции (без лотов)',plan.max_theoretical_shares],['Теоретический риск, ₽',fmt(plan.theoretical_loss_rub)]
+ ]);
+ let model='';
+ if(m && m.status==='ok'){
+  model=makeTable('Исследовательская модель · НЕ торговый сигнал',[
+   ['Модель',m.model],['Период прогноза',m.horizon],['Оценка направления',m.direction],
+   ['Выход модели 0–100 (не вероятность заработка)',m.prediction_up_score_pct==null?'—':fmtPct(m.prediction_up_score_pct)],
+   ['Точность на поздней выборке',fmtPct(m.test_accuracy_pct)],
+   ['Базовая частота большинства',fmtPct(m.baseline_accuracy_pct)],
+   ['Объём проверочных примеров',m.test_size],['Первый день контрольной выборки',m.test_from],
+   ['Модель превысила базовый уровень?',m.beats_baseline?'Да, в данной выборке':'Нет']
+  ]);
+ } else model=makeTable('Модель',[["Диагностика",m?.message||'Недостаточно данных']]);
+ const headlines=(d.news||[]).map(n=>{let link=String(n.link||'');return /^https?:\/\//i.test(link)?`<div class="newsitem"><a href="${safeText(link)}" target="_blank" rel="noopener noreferrer">${safeText(n.title)}</a><br><small>${safeText(n.source)} · ${safeText(n.published)}</small></div>`:`<div class="newsitem">${safeText(n.title)}</div>`}).join('');
+ const news=`<div class="report-card"><h3>Новости из подключённых RSS</h3>${headlines||`<small>${d.rss_configured?'Совпадающих заголовков не найдено.':'RSS пока не настроены на сервере; новостной сигнал не вычисляется.'}</small>`}<p class="muted" style="font-size:12px">Новости — заголовки из внешних источников, без оценки тональности. Проверяйте даты и первоисточники.</p></div>`;
+ document.getElementById('researchReport').innerHTML=`<h3>${safeText(d.ticker)} · ${safeText(r.asof)} <span class="pill">${safeText(r.status)}</span></h3><p class="muted">${safeText(d.source)} · ${d.candles_used} свечей · данные не в реальном времени.</p><div class="report-grid">${mtf}${indicator}${checks}${risk}${model}${news}</div><p class="foot">${safeText(plan.note)} ${safeText(m?.note||'')} Последний календарный день в источнике исключён, пока он может содержать незавершённую свечу.</p>`;
+}
+async function researchOpen(ticker, board){
+ let status=document.getElementById('researchStatus');
+ status.textContent=`Анализирую ${ticker} (MOEX ISS)…`;
+ let capital=document.getElementById('riskCapital').value, risk=document.getElementById('riskPercent').value;
+ let url=`/api/research/${encodeURIComponent(ticker)}?board=${encodeURIComponent(board)}&risk_capital=${encodeURIComponent(capital)}&risk_pct=${encodeURIComponent(risk)}`;
+ let d=await api(url);renderResearch(d);document.getElementById('researchBoard').value=board;
+ document.getElementById('labTicker').value=ticker;document.getElementById('labBoard').value=board;
+ document.getElementById('btTicker').value=ticker;document.getElementById('btBoard').value=board;
+ status.textContent=`Готово: ${ticker}. Анализ на закрытии ${d.research.asof}; торговля не запускается.`;
+}
+async function researchStart(){
+ let b=document.getElementById('researchRun'), status=document.getElementById('researchStatus'), candidates=document.getElementById('researchCandidates');
+ let q=document.getElementById('researchQuery').value.trim(); if(!q){status.textContent='Введите название акции или тикер';return;}
+ b.disabled=true;candidates.innerHTML='';document.getElementById('researchReport').innerHTML='';
+ try {
+  let lookup=await api('/api/search?q='+encodeURIComponent(q));
+  if(!lookup.items.length){status.textContent='Акция не найдена. Попробуйте тикер MOEX.';return;}
+  let exact=lookup.items.find(x=>x.name.toLowerCase()===q.toLowerCase()||x.ticker.toLowerCase()===q.toLowerCase());
+  if(lookup.items.length===1||exact){let x=exact||lookup.items[0];await researchOpen(x.ticker,x.board);}
+  else {
+   status.textContent='Найдено несколько компаний. Выберите нужную:';
+   candidates.innerHTML=lookup.items.slice(0,15).map(x=>`<button class="secondary" data-search-ticker="${safeText(x.ticker)}" data-search-board="${safeText(x.board)}">${safeText(x.name)} · ${safeText(x.ticker)}</button>`).join('');
+  }
+ }catch(e){status.textContent='Ошибка: '+e.message}finally{b.disabled=false}
+}
+document.getElementById('researchRun').onclick=researchStart;
+document.getElementById('researchQuery').addEventListener('keydown',e=>{if(e.key==='Enter')researchStart()});
+document.getElementById('researchCandidates').onclick=async e=>{
+ let b=e.target.closest('button[data-search-ticker]');if(!b)return;
+ document.getElementById('researchCandidates').innerHTML='';
+ try{await researchOpen(b.dataset.searchTicker,b.dataset.searchBoard)}catch(err){document.getElementById('researchStatus').textContent='Ошибка: '+err.message}
+};
+const labNames={adaptive:'Adaptive Trend',adaptive_mtf:'Adaptive + 1W/1M',momentum:'Momentum',breakout:'Breakout'};
+document.getElementById('labRun').onclick=async()=>{
+ const btn=document.getElementById('labRun'),st=document.getElementById('labStatus');btn.disabled=true;st.textContent='Загружаю историю и проверяю четыре стратегии…';
+ try{
+  const ticker=document.getElementById('labTicker').value.trim().toUpperCase();
+  const qs=new URLSearchParams({board:document.getElementById('labBoard').value,years:document.getElementById('labYears').value,fee_bps:document.getElementById('labFee').value,slippage_bps:document.getElementById('labSlip').value});
+  let d=await api(`/api/strategy-lab/${encodeURIComponent(ticker)}?${qs}`);
+  document.getElementById('labRows').innerHTML=d.results.map(r=>`<tr><td>${safeText(labNames[r.strategy]||r.strategy)}</td><td>${r.test.count}${r.test.count<10?' ⚠️':''}</td><td>${fmtPct(r.test.win_rate_pct)}</td><td>${r.test.profit_factor??'—'}</td><td>${fmtPct(r.test.max_drawdown_pct)}</td><td>${fmtPct(r.test.total_return_pct)}</td><td>${fmtPct(r.train.total_return_pct)}</td></tr>`).join('');
+  st.textContent=`${ticker}: старые данные с ${d.train_from}; независимый контроль ${d.test_from} — ${d.test_to}. ${d.note}`;
+ }catch(e){st.textContent='Ошибка: '+e.message}finally{btn.disabled=false}
+};
 </script></body></html>
-
 
