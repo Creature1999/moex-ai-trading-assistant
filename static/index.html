@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MOEX AI Trading Assistant · v8</title>
+<title>MOEX AI Trading Assistant · v9</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
 :root{--bg:#0b1220;--panel:#121d30;--panel2:#17243a;--line:#263750;--text:#e8eef8;--muted:#9aabc2;--green:#26c281;--red:#f16f78;--blue:#6aa8ff;--gold:#e8bd61}
@@ -31,9 +31,10 @@ input,select{background:var(--panel2);color:var(--text);border:1px solid var(--l
 @media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}.two{grid-template-columns:1fr}}@media(max-width:520px){.grid{grid-template-columns:1fr}header{align-items:flex-start}}
 </style></head>
 <body>
-<header><div><h1>📈 MOEX AI Trading Assistant</h1><small>v8 · MOEX ISS · Техиндикаторы + временные интервалы + проверяемая модель · Без автоторговли</small></div>
+<header><div><h1>📈 MOEX AI Trading Assistant</h1><small>v9 · MOEX ISS · Техиндикаторы + временные интервалы + проверяемая модель · Без автоторговли</small></div>
 <div class="actions"><button id="scan">Сканировать рынок</button><button class="secondary" id="refresh">Обновить данные</button></div></header>
 <main>
+<p class="muted"><strong>Новая версия v9</strong> · <a href="#strategyLab">Перейти к новой лаборатории стратегий ↓</a> · <a href="/api/config" target="_blank" rel="noopener">Проверить версию сервера</a> (должно быть «v9»).</p>
 <section class="section panel" id="researchPanel">
 <h2>🔎 Поиск и полный анализ акции</h2>
 <p class="muted">Введите тикер или название, например «Сбербанк», «Газпром», SBER. Прогноз модели — исследовательская оценка, не вероятность прибыльной сделки.</p>
@@ -60,7 +61,7 @@ input,select{background:var(--panel2);color:var(--text);border:1px solid var(--l
 <div class="tablewrap"><table><thead><tr><th>Тикер</th><th>Режим</th><th>Сигнал</th><th>Оценка</th><th>Цена</th><th>RSI</th><th>Оборот за день, средн. ₽*</th><th>Тест</th></tr></thead><tbody id="fullresults"><tr><td colspan="8" class="muted">Запустите сканирование</td></tr></tbody></table></div>
 <small>* Приближённая оценка: цена × объём. Не гарантирует доступную ликвидность.</small>
 <div id="backtest" class="muted" style="margin-top:12px"></div></div>
-<div class="section panel"><h2>Базовый исторический тест · прежняя стратегия</h2>
+<div class="section panel"><h2>Архивный тест · старая стратегия EMA + RSI (не лаборатория v9)</h2>
 <p class="muted">Выберите тикер или весь рынок. Сравнивайте только тесты с одинаковыми настройками. Исторические результаты не прогнозируют доходность.</p>
 <div class="actions" style="align-items:center;margin:12px 0">
 <label>Тикер <input id="btTicker" value="SBER" maxlength="24" style="width:100px;background:#17243a;color:white;padding:9px;border:1px solid #263750;border-radius:8px"></label>
@@ -86,19 +87,19 @@ input,select{background:var(--panel2);color:var(--text);border:1px solid var(--l
 <div class="section panel"><h2>Новости</h2><div id="news" class="muted">RSS-ленты не настроены. Добавьте источники в переменную RSS_FEEDS.</div></div>
 
 <section class="section panel" id="strategyLab">
-<h2>🧪 Лаборатория стратегий · проверка на новых данных</h2>
-<p class="muted">Сравнение фиксированных правил, без подбора параметров на контрольной части истории. 70% старых наблюдений — первоначальный период; последние 30% — контрольный. Результаты НЕ гарантия заработка.</p>
+<h2>🧪 Лаборатория v9 · новые правила, ATR и контроль на новых данных</h2>
+<p class="muted">Здесь НЕТ старой стратегии с выходом через 10 свечей. Вход только по новому сигналу, ATR-стоп и трейлинг, ограничение начального риска 1% капитала без плеча. 70% более старой истории — первоначальный период; последние 30% — контроль. Сравнение с «купить и держать» обязательно. Это не гарантия прибыли.</p>
 <div class="actions" style="align-items:center;margin:10px 0">
 <input id="labTicker" value="SBER" aria-label="Тикер для стратегии" placeholder="SBER" maxlength="24">
 <select id="labBoard" aria-label="Режим торгов"><option>TQBR</option><option>TQTF</option><option>TQPI</option><option>TQDE</option><option>TQIR</option></select>
 <select id="labYears" aria-label="Период теста"><option value="1">1 год</option><option value="3" selected>3 года</option><option value="5">5 лет</option></select>
 <label>Комиссия, б.п. <input id="labFee" type="number" min="0" max="100" value="10" style="width:75px"></label>
 <label>Проскальзывание, б.п. <input id="labSlip" type="number" min="0" max="100" value="10" style="width:75px"></label>
-<button id="labRun">Сравнить 4 стратегии</button>
+<button id="labRun">Сравнить 5 стратегий с ATR</button>
 </div>
-<p id="labStatus" class="muted">Нажмите «Сравнить 4 стратегии».</p>
-<div class="tablewrap"><table><thead><tr><th>Стратегия</th><th>Сделок в тесте</th><th>Win Rate<br>в тесте</th><th>Profit Factor<br>в тесте</th><th>Макс. просадка<br>в тесте</th><th>Доходность<br>в тесте</th><th>Доходность<br>на старых данных</th></tr></thead><tbody id="labRows"></tbody></table></div>
-<small>⚠️ При 0–9 сделках статистика особенно ненадёжна. Не учитываются дивиденды, налоги, ликвидность, корпоративные события и выбывшие из выборки акции.</small>
+<p id="labStatus" class="muted">Нажмите «Сравнить 5 стратегий с ATR».</p>
+<div class="tablewrap"><table><thead><tr><th>Стратегия</th><th>Сделок в тесте</th><th>Win Rate<br>в тесте</th><th>Profit Factor<br>в тесте</th><th>Макс. просадка<br>в тесте</th><th>Доходность<br>в тесте</th><th>Доходность<br>на старых данных</th><th>Вывод<br>по контрольному периоду</th></tr></thead><tbody id="labRows"></tbody></table></div>
+<small>⚠️ Для оценки преимуществ требуется хотя бы 20 сделок на контрольном периоде, а лучше намного больше. Даже при 20 сделках статистика ненадёжна. Не учитываются дивиденды, налоги, ликвидность, корпоративные события и выбывшие из выборки акции.</small>
 </section>
 <div class="foot">Важное предупреждение: оценка 0–5 показывает количество выполненных фильтров, а не вероятность успеха и не винрейт. Прототип не гарантирует доходность, не учитывает автоматически все комиссии, спреды, корпоративные события и ограничения конкретного инструмента. Не используйте сигналы для реальных сделок без независимой проверки и тестирования.</div>
 </main>
@@ -194,16 +195,18 @@ document.getElementById('researchCandidates').onclick=async e=>{
  document.getElementById('researchCandidates').innerHTML='';
  try{await researchOpen(b.dataset.searchTicker,b.dataset.searchBoard)}catch(err){document.getElementById('researchStatus').textContent='Ошибка: '+err.message}
 };
-const labNames={adaptive:'Adaptive Trend',adaptive_mtf:'Adaptive + 1W/1M',momentum:'Momentum',breakout:'Breakout'};
+const labNames={adaptive:'Adaptive Trend · ATR',adaptive_mtf:'Adaptive + 1W/1M · ATR',adaptive_pullback:'Adaptive Pullback · EMA20 + ATR',momentum:'Momentum · ATR',breakout:'Breakout · ATR'};
 document.getElementById('labRun').onclick=async()=>{
- const btn=document.getElementById('labRun'),st=document.getElementById('labStatus');btn.disabled=true;st.textContent='Загружаю историю и проверяю четыре стратегии…';
+ const btn=document.getElementById('labRun'),st=document.getElementById('labStatus');btn.disabled=true;st.textContent='Загружаю историю, сравниваю 5 стратегий с ATR и удержание акции…';
  try{
   const ticker=document.getElementById('labTicker').value.trim().toUpperCase();
   const qs=new URLSearchParams({board:document.getElementById('labBoard').value,years:document.getElementById('labYears').value,fee_bps:document.getElementById('labFee').value,slippage_bps:document.getElementById('labSlip').value});
   let d=await api(`/api/strategy-lab/${encodeURIComponent(ticker)}?${qs}`);
-  document.getElementById('labRows').innerHTML=d.results.map(r=>`<tr><td>${safeText(labNames[r.strategy]||r.strategy)}</td><td>${r.test.count}${r.test.count<10?' ⚠️':''}</td><td>${fmtPct(r.test.win_rate_pct)}</td><td>${r.test.profit_factor??'—'}</td><td>${fmtPct(r.test.max_drawdown_pct)}</td><td>${fmtPct(r.test.total_return_pct)}</td><td>${fmtPct(r.train.total_return_pct)}</td></tr>`).join('');
-  st.textContent=`${ticker}: старые данные с ${d.train_from}; независимый контроль ${d.test_from} — ${d.test_to}. ${d.note}`;
+  let a=d.results.map(r=>`<tr><td>${safeText(labNames[r.strategy]||r.strategy)}</td><td>${r.test.count}${r.test.count<20?' ⚠️':''}</td><td>${fmtPct(r.test.win_rate_pct)}</td><td>${r.test.profit_factor??'—'}</td><td>${fmtPct(r.test.max_drawdown_pct)}</td><td>${fmtPct(r.test.total_return_pct)}</td><td>${fmtPct(r.train.total_return_pct)}</td><td>${safeText(r.status)}</td></tr>`);
+  let bh=d.buy_hold;
+  a.push(`<tr><td><strong>Купить и держать · ориентир</strong></td><td>—</td><td>—</td><td>—</td><td>${fmtPct(bh.test.max_drawdown_pct)}</td><td>${fmtPct(bh.test.total_return_pct)}</td><td>${fmtPct(bh.train.total_return_pct)}</td><td>Пассивный ориентир, не стратегия сигналов</td></tr>`);
+  document.getElementById('labRows').innerHTML=a.join('');
+  st.textContent=`Новая версия ${d.version||'?'} · ${ticker}. Старые данные с ${d.train_from}; контроль ${d.test_from} — ${d.test_to}. ${d.note}`;
  }catch(e){st.textContent='Ошибка: '+e.message}finally{btn.disabled=false}
 };
 </script></body></html>
-
