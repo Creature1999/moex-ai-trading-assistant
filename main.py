@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 APP_TITLE = "MOEX AI Trading Assistant"
+APP_VERSION = "v9"
 DB_PATH = os.getenv("DB_PATH", "assistant.db")
 TICKERS = [x.strip().upper() for x in os.getenv("TICKERS", "SBER,GAZP,LKOH,ROSN,YDEX").split(",") if x.strip()]
 BOARD = os.getenv("MOEX_BOARD", "TQBR")
@@ -448,7 +449,7 @@ def home():
 @app.get("/api/config")
 def config():
     return {"tickers": TICKERS, "board": BOARD, "scan_interval_minutes": SCAN_INTERVAL,
-            "telegram_configured": bool(TELEGRAM_TOKEN and TELEGRAM_CHAT_ID), "full_market_scan": True}
+            "telegram_configured": bool(TELEGRAM_TOKEN and TELEGRAM_CHAT_ID), "full_market_scan": True, "version": APP_VERSION}
 
 @app.post("/api/scan")
 def api_scan():
@@ -547,7 +548,7 @@ def research(ticker: str, board: str = "TQBR", risk_capital: float = 100000,
 
 @app.get("/api/strategy-lab/{ticker}")
 def strategy_lab(ticker: str, board: str = "TQBR", years: int = 3, fee_bps: float = 10, slippage_bps: float = 10):
-    from strategy_lab import backtest
+    from strategy_lab import backtest, buy_and_hold
     from research_desk import completed_daily
     validate_test(years, fee_bps, slippage_bps)
     if board not in MARKET_BOARDS or not re.fullmatch(r"[A-Z0-9_.-]{1,24}", ticker.upper()):
@@ -561,17 +562,29 @@ def strategy_lab(ticker: str, board: str = "TQBR", years: int = 3, fee_bps: floa
         if len(df)-begin_ix<100:
             raise ValueError('Недостаточно завершённых свечей для честного сравнения')
         split_ix=begin_ix+int((len(df)-begin_ix)*0.7)
-        modes=("adaptive", "adaptive_mtf", "momentum", "breakout")
+        modes=("adaptive", "adaptive_mtf", "adaptive_pullback", "momentum", "breakout")
         rows=[]
+        train_benchmark=buy_and_hold(df.iloc[:split_ix].copy(),begin_ix,fee_bps,slippage_bps)
+        test_benchmark=buy_and_hold(df,split_ix,fee_bps,slippage_bps)
+        fields=("count","win_rate_pct","profit_factor","max_drawdown_pct","total_return_pct")
         for mode in modes:
             train=backtest(df.iloc[:split_ix].copy(),years,fee_bps,slippage_bps,mode,start_index=begin_ix)
             holdout=backtest(df,years,fee_bps,slippage_bps,mode,start_index=split_ix)
-            rows.append({"strategy":mode, "train": {k:train[k] for k in ("count","win_rate_pct","profit_factor","max_drawdown_pct","total_return_pct")},
-                        "test": {k:holdout[k] for k in ("count","win_rate_pct","profit_factor","max_drawdown_pct","total_return_pct")}})
-        return {"ticker":ticker.upper(),"board":board,"years":years,
+            # NEVER select a winner from the holdout. Present all candidates, fixed parameters.
+            # Even with favorable statistics this remains unproven without more assets/periods.
+            enough=holdout["count"]>=20
+            positive=(holdout["total_return_pct"]>0 and (holdout["profit_factor"] or 0)>1.2)
+            outperform=(holdout["total_return_pct"]>test_benchmark["total_return_pct"])
+            status=("НЕДОСТАТОЧНО СДЕЛОК" if not enough else
+                    "ТРЕБУЕТ ДОПОЛНИТЕЛЬНОЙ ПРОВЕРКИ" if positive and outperform else
+                    "ПРЕИМУЩЕСТВО НЕ ПОДТВЕРЖДЕНО")
+            rows.append({"strategy":mode, "train":{k:train[k] for k in fields},
+                         "test":{k:holdout[k] for k in fields},"status":status})
+        return {"ticker":ticker.upper(),"board":board,"years":years,"version":APP_VERSION,
                 "train_from":str(df.begin.iloc[begin_ix].date()),"test_from":str(df.begin.iloc[split_ix].date()),
                 "test_to":str(df.begin.iloc[-1].date()),"results":rows,
-                "note":"Фиксированные правила без подбора по тесту. Обучающий/контрольный период 70/30 по времени; модель держит до одной позиции в акции, капитал реинвестируется, комиссия и проскальзывание на входе и выходе. Без дивидендов, делистингов, налогов и корпоративных корректировок. Мало сделок = статистически ненадёжно."}
+                "buy_hold":{"train":train_benchmark,"test":test_benchmark},
+                "note":"Сравниваются ПЯТЬ новых стратегий, НЕ прежняя EMA+RSI с выходом через 10 свечей. Фиксированные правила и хронологический контроль 70/30, без подбора на контрольном участке. Риск на исходном стопе до 1% капитала (гэпы могут дать больший убыток), без плеча, комиссии и проскальзывание на обе стороны. Показаны и простаивающие периоды. Контроль на одном отрезке/тикере и малое число сделок не доказывают преимуществ. Не учитываются дивиденды, корпоративные действия, ликвидность и налоги."}
     except ValueError as e:
         raise HTTPException(400, detail=str(e))
     except Exception as e:
