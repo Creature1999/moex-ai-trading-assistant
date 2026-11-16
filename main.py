@@ -142,44 +142,6 @@ def calculate(df: pd.DataFrame) -> dict:
     tr = pd.concat([x["high"] - x["low"], (x["high"] - prev).abs(), (x["low"] - prev).abs()], axis=1).max(axis=1)
     x["atr"] = tr.rolling(14).mean()
     x["vol_avg20"] = x["volume"].rolling(20).mean()
-    # Additional technical indicators; calculations use only past/current daily candles.
-    ema12 = c.ewm(span=12, adjust=False).mean()
-    ema26 = c.ewm(span=26, adjust=False).mean()
-    macd_line = ema12 - ema26
-    macd_signal = macd_line.ewm(span=9, adjust=False).mean()
-    macd_hist = macd_line - macd_signal
-    # Wilder smoothing for ADX(14).
-    high_delta = x["high"].diff()
-    low_delta = -x["low"].diff()
-    plus_dm = high_delta.where((high_delta > low_delta) & (high_delta > 0), 0.0)
-    minus_dm = low_delta.where((low_delta > high_delta) & (low_delta > 0), 0.0)
-    atr_wilder = tr.ewm(alpha=1/14, adjust=False).mean()
-    plus_di = 100 * plus_dm.ewm(alpha=1/14, adjust=False).mean() / atr_wilder.replace(0, float("nan"))
-    minus_di = 100 * minus_dm.ewm(alpha=1/14, adjust=False).mean() / atr_wilder.replace(0, float("nan"))
-    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, float("nan"))
-    adx = dx.ewm(alpha=1/14, adjust=False).mean()
-    # Supertrend(10,3): use previous trailing bands to avoid future leakage.
-    atr10 = tr.ewm(alpha=1/10, adjust=False).mean()
-    mid = (x["high"] + x["low"]) / 2
-    upper = (mid + 3 * atr10).to_numpy()
-    lower = (mid - 3 * atr10).to_numpy()
-    closes = c.to_numpy()
-    st_upper, st_lower = upper.copy(), lower.copy()
-    st_dir = [1] * len(x)
-    st_line = [float("nan")] * len(x)
-    st_line[0] = float(lower[0])
-    for i in range(1, len(x)):
-        if closes[i-1] <= st_upper[i-1]:
-            st_upper[i] = min(upper[i], st_upper[i-1])
-        if closes[i-1] >= st_lower[i-1]:
-            st_lower[i] = max(lower[i], st_lower[i-1])
-        if closes[i] > st_upper[i-1]:
-            st_dir[i] = 1
-        elif closes[i] < st_lower[i-1]:
-            st_dir[i] = -1
-        else:
-            st_dir[i] = st_dir[i-1]
-        st_line[i] = float(st_lower[i] if st_dir[i] == 1 else st_upper[i])
     last = x.iloc[-1]
     score, reasons = 0, []
     checks = [
@@ -207,24 +169,7 @@ def calculate(df: pd.DataFrame) -> dict:
         "atr": float(last.atr), "entry": entry, "stop": stop, "target": target,
         "reason": "; ".join(reasons) or "Фильтры стратегии не подтверждены",
         "avg_turnover_20": float((x["close"] * x["volume"]).tail(20).mean()),
-        "date": str(last.begin.date()),
-        "supertrend": round(st_line[-1], 4), "supertrend_direction": "РОСТ" if st_dir[-1] == 1 else "СНИЖЕНИЕ",
-        "macd": round(float(macd_line.iloc[-1]), 5),
-        "macd_signal": round(float(macd_signal.iloc[-1]), 5),
-        "macd_histogram": round(float(macd_hist.iloc[-1]), 5),
-        "adx": round(float(adx.iloc[-1]), 2) if pd.notna(adx.iloc[-1]) else None,
-        "plus_di": round(float(plus_di.iloc[-1]), 2) if pd.notna(plus_di.iloc[-1]) else None,
-        "minus_di": round(float(minus_di.iloc[-1]), 2) if pd.notna(minus_di.iloc[-1]) else None,
-        "volume": float(last.volume), "volume_avg20": float(last.vol_avg20),
-        "volume_ratio": round(float(last.volume / last.vol_avg20), 2) if pd.notna(last.vol_avg20) and last.vol_avg20 > 0 else None,
-        "indicator_summary": {
-            "ema": "ВОСХОДЯЩИЙ" if last.close > last.ema200 and last.ema20 > last.ema50 > last.ema200 else "НЕ ПОДТВЕРЖДЁН",
-            "supertrend": "ВОСХОДЯЩИЙ" if st_dir[-1] == 1 else "НИСХОДЯЩИЙ",
-            "macd": "ПОЛОЖИТЕЛЬНЫЙ" if macd_hist.iloc[-1] > 0 else "ОТРИЦАТЕЛЬНЫЙ",
-            "adx": "СИЛЬНЫЙ ТРЕНД" if pd.notna(adx.iloc[-1]) and adx.iloc[-1] >= 25 else "СЛАБЫЙ / НЕОПРЕДЕЛЁННЫЙ",
-            "rsi": "ВЫШЕ 70" if last.rsi > 70 else ("НИЖЕ 30" if last.rsi < 30 else "30–70"),
-            "volume": "ВЫШЕ СРЕДНЕГО" if last.volume > last.vol_avg20 else "НЕ ВЫШЕ СРЕДНЕГО",
-        },
+        "date": str(last.begin.date())
     }
 
 def save_signal(ticker: str, a: dict):
@@ -444,158 +389,6 @@ def market_backtest_status():
     return output
 
 
-
-# Multi-strategy research engine. Signals are computed using information available
-# at the close; entries occur on the following day's open.
-def strategy_features(df: pd.DataFrame) -> pd.DataFrame:
-    x = df.copy().reset_index(drop=True)
-    c, h, l = x["close"], x["high"], x["low"]
-    for n in (20, 50, 200):
-        x[f"ema{n}"] = c.ewm(span=n, adjust=False).mean()
-    delta = c.diff()
-    up = delta.clip(lower=0).ewm(alpha=1/14, adjust=False).mean()
-    down = (-delta.clip(upper=0)).ewm(alpha=1/14, adjust=False).mean()
-    x["rsi"] = 100 - 100/(1 + up/down.replace(0, float("nan")))
-    prev = c.shift()
-    tr = pd.concat([h-l, (h-prev).abs(), (l-prev).abs()], axis=1).max(axis=1)
-    x["atr"] = tr.ewm(alpha=1/14, adjust=False).mean()
-    x["vol_avg20"] = x["volume"].rolling(20).mean()
-    macd = c.ewm(span=12, adjust=False).mean() - c.ewm(span=26, adjust=False).mean()
-    x["macd_hist"] = macd - macd.ewm(span=9, adjust=False).mean()
-    hd, ld = h.diff(), -l.diff()
-    plus = hd.where((hd > ld) & (hd > 0), 0.0).ewm(alpha=1/14, adjust=False).mean()
-    minus = ld.where((ld > hd) & (ld > 0), 0.0).ewm(alpha=1/14, adjust=False).mean()
-    atr = tr.ewm(alpha=1/14, adjust=False).mean().replace(0, float("nan"))
-    pdi, mdi = 100*plus/atr, 100*minus/atr
-    dx = 100*(pdi-mdi).abs()/(pdi+mdi).replace(0, float("nan"))
-    x["adx"] = dx.ewm(alpha=1/14, adjust=False).mean()
-    x["plus_di"], x["minus_di"] = pdi, mdi
-    atr10 = tr.ewm(alpha=1/10, adjust=False).mean()
-    basic_up = ((h+l)/2 + 3*atr10).to_numpy()
-    basic_low = ((h+l)/2 - 3*atr10).to_numpy()
-    close = c.to_numpy()
-    final_up, final_low = basic_up.copy(), basic_low.copy()
-    direction = [1]*len(x)
-    for i in range(1,len(x)):
-        final_up[i] = basic_up[i] if (basic_up[i] < final_up[i-1] or close[i-1] > final_up[i-1]) else final_up[i-1]
-        final_low[i] = basic_low[i] if (basic_low[i] > final_low[i-1] or close[i-1] < final_low[i-1]) else final_low[i-1]
-        if close[i] > final_up[i-1]: direction[i] = 1
-        elif close[i] < final_low[i-1]: direction[i] = -1
-        else: direction[i] = direction[i-1]
-    x["st_up"] = pd.Series(direction, dtype=int).eq(1)
-    x["high20_previous"] = h.shift(1).rolling(20).max()
-    return x
-
-STRATEGY_LABELS = {
-    "baseline": "Базовая EMA + RSI + Volume",
-    "trend": "Trend Following: EMA + Supertrend + ADX",
-    "momentum": "Momentum: EMA + MACD + RSI + Volume",
-    "breakout": "Breakout: 20-дневный максимум + ADX + Volume",
-}
-
-def strategy_signal(x: pd.DataFrame, name: str) -> pd.Series:
-    c = x["close"]
-    trend = (c > x["ema200"]) & (x["ema50"] > x["ema200"])
-    if name == "baseline":
-        score = ((c > x["ema200"]).astype(int) + (x["ema50"] > x["ema200"]).astype(int)
-                 + (x["ema20"] > x["ema50"]).astype(int) + x["rsi"].between(45,65).astype(int)
-                 + ((c >= x["open"]) & (x["volume"] > x["vol_avg20"])).astype(int))
-        return (score >= 4) & (c > x["ema200"])
-    if name == "trend":
-        return trend & x["st_up"] & (x["adx"] >= 23) & (x["plus_di"] > x["minus_di"])
-    if name == "momentum":
-        return trend & (x["ema20"] > x["ema50"]) & (x["macd_hist"] > 0) & x["rsi"].between(48,70) & (x["volume"] > x["vol_avg20"])
-    if name == "breakout":
-        return trend & (c > x["high20_previous"]) & (x["adx"] >= 20) & (x["volume"] > 1.2*x["vol_avg20"])
-    raise ValueError("Неизвестная стратегия")
-
-def simulate_strategy(x: pd.DataFrame, name: str, years: int, fee_bps: float, slippage_bps: float) -> dict:
-    if len(x) < 230:
-        raise ValueError("Недостаточно свечей для прогрева EMA200 и тестирования")
-    signals = strategy_signal(x, name).fillna(False)
-    cutoff = x["begin"].max() - pd.DateOffset(years=years)
-    start = max(210, int(x["begin"].searchsorted(cutoff)))
-    cost = (fee_bps+slippage_bps)/10000
-    capital = 1.0
-    curve, trades = [], []
-    i = start
-    while i < len(x):
-        if bool(signals.iloc[i-1]) and i+10 < len(x):
-            entry, exit_price = float(x.iloc[i]["open"]), float(x.iloc[i+10]["close"])
-            if entry > 0 and exit_price > 0 and math.isfinite(entry) and math.isfinite(exit_price):
-                factor = (exit_price/entry)*(1-cost)/(1+cost)
-                trades.append({"entry_date":str(x.iloc[i]["begin"].date()), "exit_date":str(x.iloc[i+10]["begin"].date()), "return_pct":round((factor-1)*100,4)})
-                base = capital
-                for j in range(i,i+11):
-                    marked = base*(float(x.iloc[j]["close"])/entry)/(1+cost)
-                    if j == i+10: marked = base*factor
-                    curve.append({"date":str(x.iloc[j]["begin"].date()),"equity":round(marked,6)})
-                capital *= factor
-                i += 11
-                continue
-        curve.append({"date":str(x.iloc[i]["begin"].date()),"equity":round(capital,6)})
-        i += 1
-    wins = [t["return_pct"] for t in trades if t["return_pct"] > 0]
-    losses = [-t["return_pct"] for t in trades if t["return_pct"] < 0]
-    pf = round(sum(wins)/sum(losses),3) if losses else None
-    peak, max_dd = 1.0, 0.0
-    for pt in curve:
-        peak = max(peak,pt["equity"])
-        max_dd = max(max_dd,(peak-pt["equity"])/peak)
-    return {"strategy":name,"label":STRATEGY_LABELS[name],"count":len(trades),
-            "win_rate_pct":round(100*len(wins)/len(trades),2) if trades else None,
-            "profit_factor":pf,"max_drawdown_pct":round(100*max_dd,2),
-            "total_return_pct":round(100*(capital-1),2),"trades":trades,"equity_curve":curve,
-            "first_date":str(x.iloc[start]["begin"].date()),"last_date":str(x.iloc[-1]["begin"].date())}
-
-@app.get("/api/strategies")
-def available_strategies():
-    return {"strategies": [{"id":k,"name":v} for k,v in STRATEGY_LABELS.items()],
-            "method":"Дневные свечи; сигнал по закрытию, вход на следующем открытии; выход через 10 свечей; одна длинная позиция; комиссии и проскальзывание на обе стороны. Без дивидендов, корпоративных корректировок и налогов."}
-
-@app.get("/api/strategies/compare/{ticker}")
-def compare_strategies(ticker: str, board: str = "TQBR", years: int = 3, fee_bps: float = 10, slippage_bps: float = 10):
-    validate_test(years,fee_bps,slippage_bps)
-    ticker = ticker.upper()
-    if board not in MARKET_BOARDS or not re.fullmatch(r"[A-Z0-9_.-]{1,24}",ticker):
-        raise HTTPException(400,"Некорректный тикер или режим торгов")
-    try:
-        raw = get_candles(ticker, days=years*366+550, board=board)
-        x = strategy_features(raw)
-        results = [simulate_strategy(x,k,years,fee_bps,slippage_bps) for k in STRATEGY_LABELS]
-        return {"ticker":ticker,"board":board,"years":years,"results":results,
-                "warning":"Рейтинг по историческим данным не означает будущую доходность. Текущий каталог исключает выбывшие акции; нет дивидендов, корпоративных корректировок и налогов. Выбор лучшей стратегии по тем же данным ведёт к подгонке."}
-    except Exception as e:
-        raise HTTPException(400,str(e))
-
-
-@app.get("/api/lookup")
-def lookup(q: str):
-    """Find one share by ticker or Russian company name and analyze it."""
-    query = q.strip().casefold()
-    if not query or len(query) > 80:
-        raise HTTPException(status_code=400, detail="Введите название акции или тикер")
-    try:
-        items = get_catalog()
-        exact = [x for x in items if x["ticker"].casefold() == query or str(x["name"]).casefold() == query]
-        partial = [x for x in items if query in x["ticker"].casefold() or query in str(x["name"]).casefold()]
-        matches = exact or partial
-        if not matches:
-            raise HTTPException(status_code=404, detail="Акция не найдена в текущем каталоге MOEX")
-        if len(matches) > 1 and not exact:
-            return {"matches": matches[:20], "ambiguous": True}
-        item = matches[0]
-        df = get_candles(item["ticker"], board=item["board"])
-        analysis = calculate(df)
-        tail = df.tail(180)
-        candles = [{"date": str(r.begin.date()), "close": float(r.close)} for r in tail.itertuples()]
-        return {"ambiguous": False, "item": item, "analysis": analysis, "candles": candles}
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-
 @app.get("/api/catalog")
 def catalog():
     items = get_catalog()
@@ -680,3 +473,16 @@ def test_telegram():
     if not ok:
         raise HTTPException(status_code=400, detail=msg)
     return {"status": "ok", "message": msg}
+
+
+@app.get("/api/strategy-lab/{ticker}")
+def strategy_lab(ticker: str, board: str = "TQBR", years: int = 3, fee_bps: float = 10, slippage_bps: float = 10):
+    from strategy_lab import backtest
+    validate_test(years, fee_bps, slippage_bps)
+    if board not in MARKET_BOARDS or not re.fullmatch(r"[A-Z0-9_.-]{1,24}", ticker.upper()):
+        raise HTTPException(400, "Некорректный тикер или режим торгов")
+    try:
+        df = get_candles(ticker.upper(), days=years*366+550, board=board)
+        return {"ticker": ticker.upper(), "results": [backtest(df,years,fee_bps,slippage_bps,mode) for mode in ("adaptive","momentum","breakout")]}
+    except Exception as e:
+        raise HTTPException(400, detail=str(e))
