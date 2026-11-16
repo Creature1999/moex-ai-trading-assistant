@@ -2,9 +2,13 @@ import os, sqlite3, threading, time, math, re
 from datetime import datetime, timedelta, timezone
 from contextlib import closing
 from pathlib import Path
+from zoneinfo import ZoneInfo
 import requests
 import pandas as pd
-import feedparser
+try:
+    import feedparser
+except ImportError:
+    feedparser = None  # optional when running isolated unit tests
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
@@ -114,7 +118,7 @@ def get_candles(ticker: str, days: int = 900, board: str = None) -> pd.DataFrame
             break
         rows.extend(page)
         offset += len(page)
-        if len(page) < 500 or offset > 12000:
+        if offset > 12000:
             break
         time.sleep(REQUEST_PAUSE)
     if not rows:
@@ -123,7 +127,14 @@ def get_candles(ticker: str, days: int = 900, board: str = None) -> pd.DataFrame
     for col in ["open", "high", "low", "close", "volume"]:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df["begin"] = pd.to_datetime(df["begin"])
-    return df.dropna(subset=["open", "high", "low", "close"]).sort_values("begin").drop_duplicates("begin").reset_index(drop=True)
+    df = df.dropna(subset=["open", "high", "low", "close"]).sort_values("begin").drop_duplicates("begin")
+    # MOEX may publish an INCOMPLETE daily candle for today's trading.
+    # Conservatively exclude it from all scanners and backtests.
+    today_moscow = datetime.now(ZoneInfo("Europe/Moscow")).date()
+    df = df[df["begin"].dt.date < today_moscow].reset_index(drop=True)
+    if df.empty:
+        raise ValueError("MOEX ещё не вернул завершённых дневных свечей")
+    return df
 
 def calculate(df: pd.DataFrame) -> dict:
     if len(df) < 210:
@@ -397,6 +408,8 @@ def catalog():
 
 def news_items():
     items = []
+    if feedparser is None:
+        return items
     for feed_url in RSS_FEEDS:
         try:
             feed = feedparser.parse(feed_url)
@@ -475,14 +488,91 @@ def test_telegram():
     return {"status": "ok", "message": msg}
 
 
+# v8: one report combining proven technical indicators, completed timeframes,
+# transparent risk scenarios and a strictly chronological diagnostic ML holdout.
+# No broker API credentials, automatic orders, or LLM shell execution.
+COMMON_NAMES = {"сбер": "SBER", "сбербанк": "SBER", "газпром": "GAZP",
+                "лукойл": "LKOH", "роснефть": "ROSN", "яндекс": "YDEX"}
+
+@app.get("/api/search")
+def search_companies(q: str = ""):
+    query = q.strip().casefold()
+    if not query or len(query) > 80:
+        raise HTTPException(400, "Введите название компании или тикер до 80 символов")
+    known = COMMON_NAMES.get(query)
+    if known:
+        return {"items": [{"ticker": known, "board": "TQBR", "name": q.strip()}]}
+    if re.fullmatch(r"[A-Z0-9_.-]{1,24}", q.upper()):
+        return {"items": [{"ticker": q.upper(), "board": "TQBR", "name": q.upper()}]}
+    try:
+        catalog = get_catalog()
+        items = [x for x in catalog if query in str(x['name']).casefold() or query in x['ticker'].casefold()]
+        return {"items": items[:30]}
+    except Exception as e:
+        raise HTTPException(503, f"Не удалось получить список компаний MOEX: {e}")
+
+@app.get("/api/research/{ticker}")
+def research(ticker: str, board: str = "TQBR", risk_capital: float = 100000,
+             risk_pct: float = 1.0):
+    if board not in MARKET_BOARDS or not re.fullmatch(r"[A-Z0-9_.-]{1,24}", ticker.upper()):
+        raise HTTPException(400, "Некорректный тикер или режим торгов")
+    if not math.isfinite(risk_capital) or not 1000 <= risk_capital <= 100000000:
+        raise HTTPException(400, "Учебный капитал должен быть от 1 000 до 100 000 000 ₽")
+    if not math.isfinite(risk_pct) or not 0.1 <= risk_pct <= 3:
+        raise HTTPException(400, "Риск должен быть от 0,1% до 3%")
+    try:
+        from research_desk import analyze_research, model_holdout, completed_daily
+        raw = get_candles(ticker.upper(), days=3050, board=board)
+        data = completed_daily(raw)
+        result = analyze_research(data, risk_capital=risk_capital, risk_pct=risk_pct)
+        try:
+            model = model_holdout(data)
+        except (ValueError, ArithmeticError) as e:
+            model = {"status": "unavailable", "message": str(e)}
+        # News are available only when real external RSS feeds are configured.
+        headlines = []
+        names = [ticker.upper().casefold()] + [k for k,v in COMMON_NAMES.items() if v==ticker.upper()]
+        for item in news_items():
+            title = str(item['title']).casefold()
+            if any(re.search(r'(?<![\wа-яё])'+re.escape(name)+r'(?![\wа-яё])',title,re.I) for name in names):
+                headlines.append(item)
+        return {"ticker": ticker.upper(), "board": board, "research": result,
+                "model": model, "news": headlines[:8], "rss_configured": bool(RSS_FEEDS),
+                "candles_used": len(data), "source": "MOEX ISS (завершённые дневные свечи)",
+                "not_realtime": True}
+    except ValueError as e:
+        raise HTTPException(400, detail=str(e))
+    except (requests.RequestException, KeyError, IndexError) as e:
+        raise HTTPException(503, detail=f"Ошибка данных MOEX: {e}")
+
 @app.get("/api/strategy-lab/{ticker}")
 def strategy_lab(ticker: str, board: str = "TQBR", years: int = 3, fee_bps: float = 10, slippage_bps: float = 10):
     from strategy_lab import backtest
+    from research_desk import completed_daily
     validate_test(years, fee_bps, slippage_bps)
     if board not in MARKET_BOARDS or not re.fullmatch(r"[A-Z0-9_.-]{1,24}", ticker.upper()):
         raise HTTPException(400, "Некорректный тикер или режим торгов")
     try:
-        df = get_candles(ticker.upper(), days=years*366+550, board=board)
-        return {"ticker": ticker.upper(), "results": [backtest(df,years,fee_bps,slippage_bps,mode) for mode in ("adaptive","momentum","breakout")]}
-    except Exception as e:
+        df = completed_daily(get_candles(ticker.upper(), days=max(3000,years*366+1100), board=board))
+        cutoff=df.begin.max()-pd.DateOffset(years=years)
+        # 70/30 chronological split of the requested evaluation period; indicator
+        # warmup is kept from earlier data, but trades start inside the period.
+        begin_ix=max(215,int(df.begin.searchsorted(cutoff)))
+        if len(df)-begin_ix<100:
+            raise ValueError('Недостаточно завершённых свечей для честного сравнения')
+        split_ix=begin_ix+int((len(df)-begin_ix)*0.7)
+        modes=("adaptive", "adaptive_mtf", "momentum", "breakout")
+        rows=[]
+        for mode in modes:
+            train=backtest(df.iloc[:split_ix].copy(),years,fee_bps,slippage_bps,mode,start_index=begin_ix)
+            holdout=backtest(df,years,fee_bps,slippage_bps,mode,start_index=split_ix)
+            rows.append({"strategy":mode, "train": {k:train[k] for k in ("count","win_rate_pct","profit_factor","max_drawdown_pct","total_return_pct")},
+                        "test": {k:holdout[k] for k in ("count","win_rate_pct","profit_factor","max_drawdown_pct","total_return_pct")}})
+        return {"ticker":ticker.upper(),"board":board,"years":years,
+                "train_from":str(df.begin.iloc[begin_ix].date()),"test_from":str(df.begin.iloc[split_ix].date()),
+                "test_to":str(df.begin.iloc[-1].date()),"results":rows,
+                "note":"Фиксированные правила без подбора по тесту. Обучающий/контрольный период 70/30 по времени; модель держит до одной позиции в акции, капитал реинвестируется, комиссия и проскальзывание на входе и выходе. Без дивидендов, делистингов, налогов и корпоративных корректировок. Мало сделок = статистически ненадёжно."}
+    except ValueError as e:
         raise HTTPException(400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(503, detail=f"Не удалось проверить стратегии: {e}")

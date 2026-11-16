@@ -8,7 +8,8 @@ def indicators(df):
     c=x.close.astype(float); h=x.high.astype(float); l=x.low.astype(float)
     for n in (20,50,200): x[f'ema{n}']=c.ewm(span=n,adjust=False).mean()
     d=c.diff(); gain=d.clip(lower=0).ewm(alpha=1/14,adjust=False).mean(); loss=(-d.clip(upper=0)).ewm(alpha=1/14,adjust=False).mean()
-    x['rsi']=100-100/(1+gain/loss.replace(0,np.nan))
+    rs=gain/loss.replace(0,np.nan)
+    x['rsi']=(100-100/(1+rs)).mask((loss==0)&(gain>0),100).mask((loss==0)&(gain==0),50)
     e12=c.ewm(span=12,adjust=False).mean(); e26=c.ewm(span=26,adjust=False).mean()
     x['macd']=e12-e26; x['macd_signal']=x.macd.ewm(span=9,adjust=False).mean()
     pc=c.shift(1); tr=pd.concat([(h-l),(h-pc).abs(),(l-pc).abs()],axis=1).max(axis=1)
@@ -33,23 +34,43 @@ def indicators(df):
     x['supertrend']=st;x['supertrend_up']=direction==1
     return x
 
+def _completed_period_filters(x):
+    """Historical multi-timeframe confirmation using PREVIOUS FINISHED bars only.
+    Current-week/month OHLC may not be used to determine today's decision.
+    """
+    dates=pd.to_datetime(x.begin)
+    result=[]
+    for period,min_bars in [('W-SUN',50),('M',50)]:
+        groups=dates.dt.to_period(period)
+        grouped=x.assign(_period=groups).groupby('_period',sort=True,observed=True)
+        closes=grouped.close.last().astype(float)
+        ema20=closes.ewm(span=20,adjust=False).mean()
+        ema50=closes.ewm(span=50,adjust=False).mean()
+        # Signal of *previous* complete period; minimum bars reduces warmup bias.
+        positive=((closes>ema20)&(ema20>ema50)&(pd.Series(range(len(closes)),index=closes.index)>=min_bars-1))
+        previous=positive.shift(1).eq(True)
+        result.append(groups.map(previous).fillna(False).astype(bool).to_numpy())
+    return pd.Series(result[0]&result[1],index=x.index)
+
 def strategy_signals(x,mode):
     trend=(x.close>x.ema200)&(x.ema50>x.ema200)
-    if mode=='adaptive':
-        return trend & x.supertrend_up & (x.adx>=20) & (x.macd>x.macd_signal) & x.rsi.between(45,72) & (x.volume>=x.vol_avg20*.8)
+    if mode in ('adaptive','adaptive_mtf'):
+        base=trend & x.supertrend_up & (x.adx>=20) & (x.macd>x.macd_signal) & x.rsi.between(45,72) & (x.volume>=x.vol_avg20*.8)
+        return base & _completed_period_filters(x) if mode=='adaptive_mtf' else base
     if mode=='momentum':
         return trend & (x.macd>x.macd_signal) & x.rsi.between(50,70) & (x.volume>x.vol_avg20)
     if mode=='breakout':
         return trend & (x.close>x.high.shift(1).rolling(20).max()) & (x.volume>x.vol_avg20*1.2) & (x.adx>=20)
     raise ValueError('Неизвестная стратегия')
 
-def backtest(df,years=3,fee_bps=10,slippage_bps=10,mode='adaptive'):
+def backtest(df,years=3,fee_bps=10,slippage_bps=10,mode='adaptive',start_index=None):
     if len(df)<230:raise ValueError('Недостаточно истории (нужно 230 свечей)')
     x=indicators(df); sig=strategy_signals(x,mode).fillna(False)
     cutoff=x.begin.max()-pd.DateOffset(years=years)
-    start=max(210,int(x.begin.searchsorted(cutoff)))
+    start=max(210,int(x.begin.searchsorted(cutoff))) if start_index is None else max(210,int(start_index))
+    if start>=len(x): raise ValueError('Начало теста позже последней свечи')
     cost=(fee_bps+slippage_bps)/10000
-    capital=1.; trades=[]; curve=[]; i=start
+    capital=1.; trades=[]; curve=[]; gross_wins=0.; gross_losses=0.; i=start
     while i<len(x):
         if i>=1 and sig.iloc[i-1] and np.isfinite(x.atr.iloc[i-1]) and x.atr.iloc[i-1]>0:
             entry=float(x.open.iloc[i])*(1+cost)
@@ -57,18 +78,21 @@ def backtest(df,years=3,fee_bps=10,slippage_bps=10,mode='adaptive'):
             stop=entry-2*float(x.atr.iloc[i-1]); peak=float(x.high.iloc[i-1]); exit_idx=None; exit_price=None; why=''
             for j in range(i,len(x)):
                 # Stop based only on information known before this day's trading.
+                # Known prior-close reversal executes FIRST at the next open.
+                if j>i and (not bool(x.supertrend_up.iloc[j-1]) or float(x.close.iloc[j-1])<float(x.ema20.iloc[j-1])):
+                    exit_price=float(x.open.iloc[j])*(1-cost);why='trend exit';exit_idx=j;break
                 if float(x.open.iloc[j])<=stop:
                     exit_price=float(x.open.iloc[j])*(1-cost);why='gap/stop';exit_idx=j;break
                 if float(x.low.iloc[j])<=stop:
                     exit_price=stop*(1-cost);why='stop';exit_idx=j;break
-                # Exit on next open after a close-based reversal, not on same close.
-                if j>i and (not bool(x.supertrend_up.iloc[j-1]) or float(x.close.iloc[j-1])<float(x.ema20.iloc[j-1])):
-                    exit_price=float(x.open.iloc[j])*(1-cost);why='trend exit';exit_idx=j;break
                 peak=max(peak,float(x.high.iloc[j]));
                 # Trailing stop updates for NEXT session only.
                 stop=max(stop,peak-2.5*float(x.atr.iloc[j])) if np.isfinite(x.atr.iloc[j]) else stop
             if exit_idx is None:exit_idx=len(x)-1;exit_price=float(x.close.iloc[-1])*(1-cost);why='end of data'
             factor=max(0.,exit_price/entry);before=capital;capital*=factor
+            trade_pnl=capital-before
+            if trade_pnl>0:gross_wins+=trade_pnl
+            elif trade_pnl<0:gross_losses-=trade_pnl
             trades.append({'entry_date':str(x.begin.iloc[i].date()),'exit_date':str(x.begin.iloc[exit_idx].date()),'return_pct':round((factor-1)*100,3),'exit_reason':why})
             for j in range(i,exit_idx+1):
                 marked=capital if j==exit_idx else before*float(x.close.iloc[j])*(1-cost)/entry
@@ -77,11 +101,11 @@ def backtest(df,years=3,fee_bps=10,slippage_bps=10,mode='adaptive'):
         else:
             curve.append({'date':str(x.begin.iloc[i].date()),'equity':round(capital,6)});i+=1
     returns=[t['return_pct']/100 for t in trades];wins=[r for r in returns if r>0];losses=[r for r in returns if r<0]
-    gp=sum(wins);gl=-sum(losses);peak=1.;dd=0.
+    gp=gross_wins;gl=gross_losses;peak=1.;dd=0.
     for point in curve:
         peak=max(peak,point['equity']);dd=max(dd,(peak-point['equity'])/peak)
     return {'strategy':mode,'count':len(trades),'win_rate_pct':round(100*len(wins)/len(trades),2) if trades else None,
         'profit_factor':round(gp/gl,3) if gl>0 else None,'max_drawdown_pct':round(100*dd,2),
         'total_return_pct':round(100*(capital-1),2),'trades':trades,'equity_curve':curve,
         'first_date':str(x.begin.iloc[start].date()),'last_date':str(x.begin.iloc[-1].date()),
-        'method':'Учебный тест: сигнал на закрытии, вход на следующем открытии, ATR-стоп и трейлинг, комиссия и проскальзывание на обе стороны. Без дивидендов и корректировок корпоративных событий.'}
+        'method':'Учебный тест: сигнал после закрытия, вход на следующем открытии, ATR-стоп и трейлинг, комиссия и проскальзывание на обе стороны. Для MTF используются исключительно завершённые предыдущие недели/месяцы. Без дивидендов и корректировок корпоративных событий.'}
