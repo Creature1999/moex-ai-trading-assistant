@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>MOEX AI Trading Assistant · v9</title>
+<title>MOEX AI Trading Assistant · v10</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <style>
 :root{--bg:#0b1220;--panel:#121d30;--panel2:#17243a;--line:#263750;--text:#e8eef8;--muted:#9aabc2;--green:#26c281;--red:#f16f78;--blue:#6aa8ff;--gold:#e8bd61}
@@ -29,12 +29,24 @@ input,select{background:var(--panel2);color:var(--text);border:1px solid var(--l
 #researchStatus{margin:12px 0}.signal-yes{color:var(--green)}.signal-no{color:var(--red)}
 @media(max-width:700px){.report-grid{grid-template-columns:1fr}}
 @media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}.two{grid-template-columns:1fr}}@media(max-width:520px){.grid{grid-template-columns:1fr}header{align-items:flex-start}}
+
+/* v10 diagnostics panels */
+#labDiagnostics{margin-top:17px;background:#0f192b;border:1px solid var(--line);border-radius:12px;padding:16px}
+#labDiagnostics h3,#labDiagnostics h4{margin:12px 0 8px;font-size:15px}
+#labDiagnostics .diaggrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+#labDiagnostics .diagitem{background:var(--panel2);border:1px solid var(--line);padding:12px;border-radius:8px;min-width:0}
+#labDiagnostics .diagitem strong{display:block;font-size:20px;padding-top:6px}
+#labDiagnostics table{min-width:680px}
+#labDiagnostics td{white-space:normal}
+#marketCompareResults{margin-top:12px}
+@media(max-width:900px){#labDiagnostics .diaggrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){#labDiagnostics .diaggrid{grid-template-columns:1fr}}
 </style></head>
 <body>
-<header><div><h1>📈 MOEX AI Trading Assistant</h1><small>v9 · MOEX ISS · Техиндикаторы + временные интервалы + проверяемая модель · Без автоторговли</small></div>
+<header><div><h1>📈 MOEX AI Trading Assistant</h1><small>v10 · MOEX ISS · Техиндикаторы + временные интервалы + проверяемая модель · Без автоторговли</small></div>
 <div class="actions"><button id="scan">Сканировать рынок</button><button class="secondary" id="refresh">Обновить данные</button></div></header>
 <main>
-<p class="muted"><strong>Новая версия v9</strong> · <a href="#strategyLab">Перейти к новой лаборатории стратегий ↓</a> · <a href="/api/config" target="_blank" rel="noopener">Проверить версию сервера</a> (должно быть «v9»).</p>
+<p class="muted"><strong>Новая версия v10</strong> · <a href="#strategyLab">Перейти к новой лаборатории стратегий ↓</a> · <a href="/api/config" target="_blank" rel="noopener">Проверить версию сервера</a> (должно быть «v10»).</p>
 <section class="section panel" id="researchPanel">
 <h2>🔎 Поиск и полный анализ акции</h2>
 <p class="muted">Введите тикер или название, например «Сбербанк», «Газпром», SBER. Прогноз модели — исследовательская оценка, не вероятность прибыльной сделки.</p>
@@ -87,19 +99,27 @@ input,select{background:var(--panel2);color:var(--text);border:1px solid var(--l
 <div class="section panel"><h2>Новости</h2><div id="news" class="muted">RSS-ленты не настроены. Добавьте источники в переменную RSS_FEEDS.</div></div>
 
 <section class="section panel" id="strategyLab">
-<h2>🧪 Лаборатория v9 · новые правила, ATR и контроль на новых данных</h2>
-<p class="muted">Здесь НЕТ старой стратегии с выходом через 10 свечей. Вход только по новому сигналу, ATR-стоп и трейлинг, ограничение начального риска 1% капитала без плеча. 70% более старой истории — первоначальный период; последние 30% — контроль. Сравнение с «купить и держать» обязательно. Это не гарантия прибыли.</p>
-<div class="actions" style="align-items:center;margin:10px 0">
+<h2>🧪 Лаборатория v10 · диагностика входов, режимы рынка и журнал сделок</h2>
+<p class="muted">Семь фиксированных гипотез, включая два режима: покупка отката в восходящем тренде и возврат к среднему в боковике. Программа объясняет, какие фильтры отклонили сигнал, и показывает каждую выполненную сделку. Последние 30% истории — контрольный период. Это <strong>не доказательство прибыльности</strong>; реальные дивиденды и корпоративные корректировки пока не включены.</p>
+<div class="actions" style="align-items:center;margin:12px 0">
 <input id="labTicker" value="SBER" aria-label="Тикер для стратегии" placeholder="SBER" maxlength="24">
 <select id="labBoard" aria-label="Режим торгов"><option>TQBR</option><option>TQTF</option><option>TQPI</option><option>TQDE</option><option>TQIR</option></select>
 <select id="labYears" aria-label="Период теста"><option value="1">1 год</option><option value="3" selected>3 года</option><option value="5">5 лет</option></select>
 <label>Комиссия, б.п. <input id="labFee" type="number" min="0" max="100" value="10" style="width:75px"></label>
 <label>Проскальзывание, б.п. <input id="labSlip" type="number" min="0" max="100" value="10" style="width:75px"></label>
-<button id="labRun">Сравнить 5 стратегий с ATR</button>
+<button id="labRun">Сравнить 7 стратегий и открыть диагностику</button>
 </div>
-<p id="labStatus" class="muted">Нажмите «Сравнить 5 стратегий с ATR».</p>
-<div class="tablewrap"><table><thead><tr><th>Стратегия</th><th>Сделок в тесте</th><th>Win Rate<br>в тесте</th><th>Profit Factor<br>в тесте</th><th>Макс. просадка<br>в тесте</th><th>Доходность<br>в тесте</th><th>Доходность<br>на старых данных</th><th>Вывод<br>по контрольному периоду</th></tr></thead><tbody id="labRows"></tbody></table></div>
-<small>⚠️ Для оценки преимуществ требуется хотя бы 20 сделок на контрольном периоде, а лучше намного больше. Даже при 20 сделках статистика ненадёжна. Не учитываются дивиденды, налоги, ликвидность, корпоративные события и выбывшие из выборки акции.</small>
+<p id="labStatus" class="muted">Введите SBER и запустите проверку. Ниже появятся причины отказа и сделки.</p>
+<div class="tablewrap"><table><thead><tr><th>Стратегия</th><th>Сделки</th><th>Win Rate</th><th>Profit Factor</th><th>Просадка</th><th>Доходность</th><th>Ранняя история</th><th>Диагностика</th></tr></thead><tbody id="labRows"></tbody></table></div>
+<div id="labDiagnostics" aria-live="polite"><p class="muted">Для разбора нажмите «Сравнить 7 стратегий». После расчёта выбирайте «Разобрать» напротив стратегии.</p></div>
+<div class="section" style="border-top:1px solid var(--line);padding-top:16px">
+<h3 style="font-size:16px">🌐 Сравнение на разных акциях MOEX</h3>
+<p class="muted">Запускается последовательно для SBER, GAZP и LKOH, с теми же параметрами издержек и периода. Нельзя выбрать «победителя» по этим контрольным данным. На загрузку всех историй требуется время.</p>
+<button id="compareAssets" class="secondary">Проверить SBER · GAZP · LKOH</button>
+<p id="compareAssetsStatus" class="muted" role="status"></p>
+<div id="marketCompareResults" class="tablewrap"></div>
+</div>
+<small>⚠️ Проблемы: нет дивидендов, корпоративных поправок, полной истории выбывших акций, лотов, налогов и точного исполнения. Для осторожной оценки хотя бы 20 сделок на контроле, лучше существенно больше. Все семь стратегий — исследовательские гипотезы, без заявлений о прибыльности.</small>
 </section>
 <div class="foot">Важное предупреждение: оценка 0–5 показывает количество выполненных фильтров, а не вероятность успеха и не винрейт. Прототип не гарантирует доходность, не учитывает автоматически все комиссии, спреды, корпоративные события и ограничения конкретного инструмента. Не используйте сигналы для реальных сделок без независимой проверки и тестирования.</div>
 </main>
@@ -195,18 +215,69 @@ document.getElementById('researchCandidates').onclick=async e=>{
  document.getElementById('researchCandidates').innerHTML='';
  try{await researchOpen(b.dataset.searchTicker,b.dataset.searchBoard)}catch(err){document.getElementById('researchStatus').textContent='Ошибка: '+err.message}
 };
-const labNames={adaptive:'Adaptive Trend · ATR',adaptive_mtf:'Adaptive + 1W/1M · ATR',adaptive_pullback:'Adaptive Pullback · EMA20 + ATR',momentum:'Momentum · ATR',breakout:'Breakout · ATR'};
+const labNames={adaptive:'Adaptive Trend · ATR',adaptive_mtf:'Adaptive + 1W/1M · ATR',adaptive_pullback:'Adaptive Pullback (строгий)',momentum:'Momentum · ATR',breakout:'Breakout · ATR',regime_pullback:'Тренд + откат к EMA20 · ATR',regime_range:'Боковик + возврат к среднему · ATR'};
+let latestLab=null;
+const regimeNames={up:'Восходящий',down:'Нисходящий',sideways:'Боковой',mixed:'Неопределённый'};
+function labParams(){return new URLSearchParams({board:document.getElementById('labBoard').value,years:document.getElementById('labYears').value,fee_bps:document.getElementById('labFee').value,slippage_bps:document.getElementById('labSlip').value})}
+function diagLine(label,value){return `<div class="diagitem"><small>${safeText(label)}</small><strong>${safeText(value)}</strong></div>`}
+function renderLabDiagnostics(mode){
+ if(!latestLab)return;
+ const row=latestLab.results.find(r=>r.strategy===mode);
+ if(!row)return;
+ const d=row.diagnostics, trades=row.trades||[], gates=d.gates||[];
+ const panel=document.getElementById('labDiagnostics');
+ const overview=`<div class="diaggrid">${diagLine('Торговых дней в контроле',d.days)}${diagLine('Дней со всеми условиями',d.signal_days)}${diagLine('Новых сигналов',d.fresh_signals)}${diagLine('Исполненных сделок',trades.length)}</div>`;
+ const reg=`<div class="diaggrid">${['up','down','sideways','mixed'].map(k=>diagLine(regimeNames[k],(d.regimes?.[k]??0)+' дн.')).join('')}</div>`;
+ const funnel=`<div class="tablewrap"><table><thead><tr><th>Проверяемое условие</th><th>Прошли</th><th>Отклонены на этом шаге</th></tr></thead><tbody>${gates.map(g=>`<tr><td>${safeText(g.name)}</td><td>${g.passed}</td><td>${g.rejected_here}</td></tr>`).join('')}</tbody></table></div>`;
+ const why=Object.entries(row.exit_reasons||{}).map(([reason,n])=>`<li>${safeText(reason)} — <strong>${n}</strong></li>`).join('')||'<li>Сделок нет, выходы отсутствуют.</li>';
+ const rows=trades.length?trades.map(t=>`<tr><td>${safeText(t.entry_date)}</td><td>${fmt(t.entry_price)}</td><td>${fmt(t.initial_stop)}</td><td>${safeText(t.exit_date)}</td><td>${fmt(t.exit_price)}</td><td>${fmtPct(t.return_pct)}</td><td>${t.r_multiple??'—'}</td><td>${safeText(t.exit_reason)}</td></tr>`).join(''):'<tr><td colspan="8">Сделок нет. Это не успешная торговля: проверьте, сколько сигналов было отклонено на каждом фильтре.</td></tr>';
+ panel.innerHTML=`<h3>${safeText(row.name||labNames[mode])} · разбор контрольного периода</h3>
+ <p class="muted">${safeText(row.status)}. Рынок на последней контрольной свече: ${safeText(regimeNames[d.last_regime]||'Не определён')}. Фильтры расположены по порядку, поэтому каждое отклонение отнесено к первому невыполненному условию. Статистика по дням НЕ равна числу независимых сделок.</p>
+ ${overview}<h4>Режимы рынка (счёт по дневным свечам)</h4>${reg}
+ <h4>Почему не было сигналов: последовательная воронка условий</h4>${funnel}
+ <h4>Почему вход отклонён: последние 15 завершённых дней</h4>
+ <div class="tablewrap"><table><thead><tr><th>Дата</th><th>Закрытие</th><th>Режим</th><th>Решение после закрытия</th></tr></thead><tbody>${(d.last_decisions||[]).map(r=>`<tr><td>${safeText(r.date)}</td><td>${fmt(r.close)}</td><td>${safeText(regimeNames[r.regime]||r.regime)}</td><td>${safeText(r.decision)}</td></tr>`).join('')}</tbody></table></div>
+ <h4>Причины закрытия позиций</h4><ul>${why}</ul>
+ <h4>Журнал сделок на контрольном периоде</h4><div class="tablewrap"><table><thead><tr><th>Вход</th><th>Цена</th><th>Первый стоп</th><th>Выход</th><th>Цена</th><th>Результат от капитала</th><th>R</th><th>Причина</th></tr></thead><tbody>${rows}</tbody></table></div>
+ <p class="muted">Результат — доля условного капитала, а не доходность акции. R — результат относительно расчётного первоначального риска с учётом издержек. Гэп может дать убыток больше 1R. Закрытие в конце теста условное. Тест не учитывает дивиденды и корпоративные изменения.</p>`;
+}
+function renderLabTable(d){
+ const a=d.results.map(r=>`<tr><td>${safeText(r.name||labNames[r.strategy])}</td><td>${r.test.count}${r.test.count<20?' ⚠️':''}</td><td>${fmtPct(r.test.win_rate_pct)}</td><td>${r.test.profit_factor??'—'}</td><td>${fmtPct(r.test.max_drawdown_pct)}</td><td>${fmtPct(r.test.total_return_pct)}</td><td>${fmtPct(r.train.total_return_pct)}</td><td><button class="secondary" data-diag-mode="${safeText(r.strategy)}">Разобрать</button></td></tr>`);
+ const bh=d.buy_hold;
+ a.push(`<tr><td><strong>Купить и держать (ценовой ориентир)</strong></td><td>—</td><td>—</td><td>—</td><td>${fmtPct(bh.test.max_drawdown_pct)}</td><td>${fmtPct(bh.test.total_return_pct)}</td><td>${fmtPct(bh.train.total_return_pct)}</td><td>Без торговых сигналов</td></tr>`);
+ document.getElementById('labRows').innerHTML=a.join('');
+}
+document.getElementById('labRows').onclick=e=>{const b=e.target.closest('button[data-diag-mode]');if(b)renderLabDiagnostics(b.dataset.diagMode)};
 document.getElementById('labRun').onclick=async()=>{
- const btn=document.getElementById('labRun'),st=document.getElementById('labStatus');btn.disabled=true;st.textContent='Загружаю историю, сравниваю 5 стратегий с ATR и удержание акции…';
+ const btn=document.getElementById('labRun'),st=document.getElementById('labStatus');
+ btn.disabled=true;st.textContent='Загружаю историю, рассчитываю семь стратегий и журнал сделок…';
  try{
   const ticker=document.getElementById('labTicker').value.trim().toUpperCase();
-  const qs=new URLSearchParams({board:document.getElementById('labBoard').value,years:document.getElementById('labYears').value,fee_bps:document.getElementById('labFee').value,slippage_bps:document.getElementById('labSlip').value});
-  let d=await api(`/api/strategy-lab/${encodeURIComponent(ticker)}?${qs}`);
-  let a=d.results.map(r=>`<tr><td>${safeText(labNames[r.strategy]||r.strategy)}</td><td>${r.test.count}${r.test.count<20?' ⚠️':''}</td><td>${fmtPct(r.test.win_rate_pct)}</td><td>${r.test.profit_factor??'—'}</td><td>${fmtPct(r.test.max_drawdown_pct)}</td><td>${fmtPct(r.test.total_return_pct)}</td><td>${fmtPct(r.train.total_return_pct)}</td><td>${safeText(r.status)}</td></tr>`);
-  let bh=d.buy_hold;
-  a.push(`<tr><td><strong>Купить и держать · ориентир</strong></td><td>—</td><td>—</td><td>—</td><td>${fmtPct(bh.test.max_drawdown_pct)}</td><td>${fmtPct(bh.test.total_return_pct)}</td><td>${fmtPct(bh.train.total_return_pct)}</td><td>Пассивный ориентир, не стратегия сигналов</td></tr>`);
-  document.getElementById('labRows').innerHTML=a.join('');
-  st.textContent=`Новая версия ${d.version||'?'} · ${ticker}. Старые данные с ${d.train_from}; контроль ${d.test_from} — ${d.test_to}. ${d.note}`;
+  if(!ticker)throw Error('Введите тикер');
+  const d=await api(`/api/strategy-lab/${encodeURIComponent(ticker)}?${labParams()}`);
+  latestLab=d;renderLabTable(d);renderLabDiagnostics('adaptive');
+  st.textContent=`Лаборатория ${d.version||'?'} · ${ticker}. Ранняя история с ${d.train_from}; контроль ${d.test_from} — ${d.test_to}. ${d.note}`;
  }catch(e){st.textContent='Ошибка: '+e.message}finally{btn.disabled=false}
+};
+document.getElementById('compareAssets').onclick=async()=>{
+ const b=document.getElementById('compareAssets'),st=document.getElementById('compareAssetsStatus');
+ const box=document.getElementById('marketCompareResults');
+ const tickerList=['SBER','GAZP','LKOH'];let responses=[];let errors=[];
+ b.disabled=true;box.innerHTML='';
+ try{
+  for(let i=0;i<tickerList.length;i++){
+   const ticker=tickerList[i];st.textContent=`Проверяю ${i+1} из 3: ${ticker}…`;
+   try{responses.push(await api(`/api/strategy-lab/${ticker}?${labParams()}`));}
+   catch(e){errors.push(`${ticker}: ${e.message}`)}
+  }
+  const output=[];
+  for(const d of responses){
+   for(const r of d.results){
+    output.push(`<tr><td>${safeText(d.ticker)}</td><td>${safeText(r.name||labNames[r.strategy])}</td><td>${safeText(d.test_from)} — ${safeText(d.test_to)}</td><td>${r.test.count}</td><td>${fmtPct(r.test.total_return_pct)}</td><td>${fmtPct(d.buy_hold.test.total_return_pct)}</td><td>${safeText(r.status)}</td></tr>`);
+   }
+  }
+  box.innerHTML=output.length?`<table><thead><tr><th>Акция</th><th>Стратегия</th><th>Контроль</th><th>Сделки</th><th>Доходность</th><th>Держать</th><th>Статус</th></tr></thead><tbody>${output.join('')}</tbody></table>`:'<p>Нет данных для сравнения.</p>';
+  st.textContent=`Проверено акций: ${responses.length}/3. ${errors.length?'Ошибки: '+errors.join('; '):'Обратите внимание: сравнения по контрольным периодам разных акций не доказывают устойчивой доходности.'}`;
+ }finally{b.disabled=false}
 };
 </script></body></html>
